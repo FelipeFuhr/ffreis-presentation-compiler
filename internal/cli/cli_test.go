@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/check"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine"
 )
 
@@ -192,5 +193,52 @@ func TestDoctorReportsAdapters(t *testing.T) {
 func TestDoctorRejectsUnknownFlags(t *testing.T) {
 	if code, _, _ := exec("doctor", "-nonsense"); code != exitUsage {
 		t.Errorf("exit code = %d, want %d", code, exitUsage)
+	}
+}
+
+func TestCheckRejectsBadFlags(t *testing.T) {
+	if code, _, _ := exec("check", "-nonsense"); code != exitUsage {
+		t.Errorf("exit code = %d, want %d", code, exitUsage)
+	}
+}
+
+func TestCheckReportsAnUnloadableTheme(t *testing.T) {
+	// Resolving the theme happens before the browser is launched, so this path
+	// is reachable without Chrome.
+	code, _, stderr := exec("check",
+		"-dir", t.TempDir(),
+		"-theme-root", "does/not/exist",
+		"-theme", "nope",
+	)
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr, "theme") {
+		t.Errorf("stderr does not mention the theme:\n%s", stderr)
+	}
+}
+
+func TestCheckOptionDefaults(t *testing.T) {
+	opts, err := parseCheckOptions(nil, io.Discard)
+	if err != nil {
+		t.Fatalf("parseCheckOptions: %v", err)
+	}
+	if opts.dir != "dist" {
+		t.Errorf("dir = %q, want dist", opts.dir)
+	}
+	if opts.minFont != check.DefaultMinFontPx {
+		t.Errorf("minFont = %v, want %v", opts.minFont, check.DefaultMinFontPx)
+	}
+	if opts.tolerance != check.DefaultTolerancePx {
+		t.Errorf("tolerance = %v, want %v", opts.tolerance, check.DefaultTolerancePx)
+	}
+}
+
+func TestCheckIsReachableFromDispatch(t *testing.T) {
+	// Dispatch must route "check" somewhere; with no rendered deck it fails,
+	// which is enough to prove the verb is wired.
+	code, _, _ := exec("check", "-dir", t.TempDir())
+	if code == exitUsage {
+		t.Error("check is not wired into dispatch")
 	}
 }

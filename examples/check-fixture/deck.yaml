@@ -1,0 +1,6 @@
+# A deck that is deliberately wrong. `make check-selftest` renders it and
+# asserts `check` reports every rule — proving the checker is not vacuously
+# green. Never use it as a starting point for a real deck.
+title: Check fixture
+theme: check-fixture
+aspect: "16:9"

@@ -1,3 +1,10 @@
+/* Padding and borders must not add to a declared height: several layouts are
+   sized at 100% of the slide body, and without this they overflow it by
+   exactly their padding — invisible until the content is long enough to clip. */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
 /* Slide chrome and shared components. Layout-specific rules live in 30-layouts.css. */
 
 .slide {
@@ -42,6 +49,8 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .badge {

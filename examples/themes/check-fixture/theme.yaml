@@ -1,0 +1,5 @@
+# A theme that is deliberately wrong, so `make check-selftest` can prove the
+# checker catches each rule. Never use it for a real deck.
+name: check-fixture
+fonts:
+  - NoSuchFontFamily

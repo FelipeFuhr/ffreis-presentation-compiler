@@ -139,6 +139,7 @@
   box-shadow: var(--shadow);
 }
 .media-caption {
+  flex: 0 0 auto;
   margin-top: 0.16in;
   text-align: center;
   font-size: 9.5pt;

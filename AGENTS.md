@@ -98,6 +98,30 @@ non-empty file is treated as a failure, not a no-op.
 its own config, so diagrams inherit the brand less automatically than python
 charts do.
 
+## Checks (`check`)
+
+`check` measures a **rendered** deck over CDP — it reads `dist/index.html`
+rather than re-rendering, so what ships is what gets measured. Rules:
+`overflow`, `out-of-bounds`, `tiny-type`, `contrast` (WCAG AA), `missing-asset`,
+`font-fallback`.
+
+These are measurements, not opinions. On its first run against a real deck it
+found three clipping bugs in slides that had already been eyeballed and passed,
+two of them significant (32px and 60px of content silently cut).
+
+- **`document.fonts.check()` is the obvious API and the wrong one.** It answers
+  "can this text be rendered", which is *true* for an unknown family because the
+  fallback can render it — so a rule built on it never fires. The probe inspects
+  the `document.fonts` FontFace set instead and skips families with no
+  `@font-face`, which are system fonts the theme chose deliberately.
+- **`-overflow-tolerance-px` defaults to 2.5.** Themes are authored in inches,
+  so almost every box has a fractional pixel height and a stack of them
+  accumulates 1–3px nobody can see. Raise it only with evidence, never to make a
+  deck pass.
+- `make check-selftest` renders `examples/check-fixture` — a deliberately broken
+  deck and theme — and fails unless **all six rules fire**. Without it a checker
+  that silently stopped working would look exactly like a clean deck.
+
 ## Commands
 
 ```bash
@@ -106,9 +130,11 @@ go run ./cmd/ffreis-presentation-compiler build \
   -out dist -formats html,pdf
 go run ./cmd/ffreis-presentation-compiler doctor
 
-make build        # render the example deck (override DECK= THEMES= OUT= FORMATS=)
-make smoke-check  # end-to-end render + pagination assertion
-make doctor       # which adapters are available here
+make build           # render the example deck (override DECK= THEMES= OUT= FORMATS=)
+make smoke-check     # end-to-end render + pagination assertion
+make check           # render the example deck and measure it
+make check-selftest  # prove the checker still catches all six rules
+make doctor          # which adapters are available here
 ```
 
 ## Non-obvious facts
@@ -142,20 +168,23 @@ internal/cli/                      dispatch + per-subcommand flag sets
 internal/deck/                     content model and loader
 internal/theme/                    theme loading, template FuncMap
 internal/render/                   document shell + slide assembly (base.gohtml)
+internal/check/                    measured checks (probe.js) + chromedp browser
 internal/engine/                   Renderer port, Runner, PDF adapter
 internal/gen/                      generator hook (charts, diagrams) + cache
 internal/logx/                     slog construction
 examples/sample-deck/              brand-free fixture deck
 examples/themes/sample/            brand-free fixture theme
+examples/check-fixture/            deliberately broken deck, for check-selftest
+examples/themes/check-fixture/     deliberately broken theme, ditto
 ```
 
 ## Roadmap
 
 Implemented: content model, theme + layouts, HTML, PDF, the generator hook,
-`doctor`, smoke check. Next, in order: an explicit contract file for deck.yaml;
-`check` — deterministic validators over the live DOM (overflow, out-of-bounds,
-overlap, contrast, fonts); `serve --watch`; PPTX in image mode; model-assisted
-review.
+`check`, `doctor`, smoke check and check self-test. Next, in order: an explicit
+contract file for deck.yaml; an `overlap` rule (deferred — parent/child and
+absolutely-positioned chrome make it the most false-positive-prone of the set);
+`serve --watch`; PPTX in image mode; model-assisted review.
 
 ## Keeping this file current
 

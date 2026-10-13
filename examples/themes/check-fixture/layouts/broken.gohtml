@@ -1,0 +1,8 @@
+{{- /* Every element here exists to trip exactly one rule. */ -}}
+<p class="too-small">This type is far below the legibility floor.</p>
+<p class="low-contrast">This text barely differs from its background.</p>
+<p class="escapes">This box is outside the slide.</p>
+<img src="assets/does-not-exist.png" alt="deliberately missing">
+{{- range list (get .Fields "items") }}
+<p>{{ str . }}</p>
+{{- end }}

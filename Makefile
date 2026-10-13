@@ -26,7 +26,7 @@ MUTATION_THRESHOLD ?= 60
 
 	ci-list install-act ci-local \
 	init-github \
-	install build doctor smoke-check
+	install build doctor smoke-check check check-selftest
 
 ## mutation: run mutation testing with gremlins (slow — CI only)
 mutation:
@@ -180,3 +180,27 @@ smoke-check: ## End-to-end: render the example deck and assert the PDF paginates
 	else \
 		echo "smoke: ok — $$slides slides rendered (install poppler-utils to assert pagination)"; \
 	fi
+
+CHECK_OUT ?= .bin/check
+
+check: ## Measure a rendered deck (default: the example deck, rendered first)
+	@rm -rf "$(CHECK_OUT)" && mkdir -p "$(CHECK_OUT)"
+	@go run ./cmd/$(BINARY) build -deck-root "$(EXAMPLE_DECK)" \
+		-theme-root "$(EXAMPLE_THEMES)" -out "$(CHECK_OUT)" -formats html >/dev/null
+	@go run ./cmd/$(BINARY) check -dir "$(CHECK_OUT)" -theme-root "$(EXAMPLE_THEMES)" -theme sample
+
+check-selftest: ## Prove the checker is not vacuous: the broken fixture must fail every rule
+	@rm -rf "$(CHECK_OUT)-fixture" && mkdir -p "$(CHECK_OUT)-fixture"
+	@go run ./cmd/$(BINARY) build -deck-root examples/check-fixture \
+		-theme-root "$(EXAMPLE_THEMES)" -out "$(CHECK_OUT)-fixture" -formats html >/dev/null
+	@out=$$(go run ./cmd/$(BINARY) check -dir "$(CHECK_OUT)-fixture" \
+		-theme-root "$(EXAMPLE_THEMES)" -theme check-fixture 2>&1 || true); \
+	missing=""; \
+	for rule in overflow out-of-bounds tiny-type contrast missing-asset font-fallback; do \
+		echo "$$out" | grep -q "$$rule" || missing="$$missing $$rule"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "check-selftest: the fixture did not trigger:$$missing" >&2; \
+		echo "$$out" >&2; exit 1; \
+	fi; \
+	echo "check-selftest: ok — all 6 rules fired on the broken fixture"

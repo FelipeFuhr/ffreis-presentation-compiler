@@ -32,6 +32,8 @@ func run(program string, args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "build", "compile":
 		return runBuild(args[1:], stdout, stderr)
+	case "check":
+		return runCheck(args[1:], stdout, stderr)
 	case "doctor":
 		return runDoctor(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
@@ -49,10 +51,12 @@ func usage(w io.Writer, program string) {
 
 usage:
   %s build  -deck-root <dir> -theme-root <dir> [-out dist] [-formats html,pdf]
-  %s doctor [-theme-root <dir>]
+  %s check  [-dir dist] [-theme-root <dir> -theme <name>]
+  %s doctor
 
 commands:
   build    render a deck directory into the output directory
+  check    measure a rendered deck: overflow, out-of-bounds, contrast, fonts
   doctor   report which render adapters are available on this machine
-`, program, program, program)
+`, program, program, program, program)
 }
