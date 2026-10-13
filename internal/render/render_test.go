@@ -1,6 +1,7 @@
 package render_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,8 +18,8 @@ const (
 )
 
 // renderSample compiles the shipped example deck into a temp dir and returns
-// the output dir plus the rendered HTML.
-func renderSample(t *testing.T) (string, string) {
+// the output dir, the rendered HTML and the deck it came from.
+func renderSample(t *testing.T) (string, string, *deck.Deck) {
 	t.Helper()
 	d, err := deck.Load(sampleDeck)
 	if err != nil {
@@ -36,20 +37,23 @@ func renderSample(t *testing.T) (string, string) {
 	if err != nil {
 		t.Fatalf("read index: %v", err)
 	}
-	return out, string(html)
+	return out, string(html), d
 }
 
 func TestRenderWritesOneSectionPerSlide(t *testing.T) {
-	_, html := renderSample(t)
+	_, html, d := renderSample(t)
 
-	if got := strings.Count(html, "<section"); got != 6 {
-		t.Errorf("rendered %d sections, want 6 (one per slide)", got)
+	// Derived from the deck, not hardcoded: the invariant is one section per
+	// slide, and adding an example slide must not break the test.
+	if got, want := strings.Count(html, "<section"), len(d.Slides); got != want {
+		t.Errorf("rendered %d sections, want %d (one per slide)", got, want)
 	}
 	// Pagination is the contract the PDF path depends on.
 	if !strings.Contains(html, "@page { size: 13.333in 7.5in; margin: 0; }") {
 		t.Error("document shell is missing the @page rule that sizes every PDF page")
 	}
-	if !strings.Contains(html, `data-slide="1"`) || !strings.Contains(html, `data-slide="6"`) {
+	if !strings.Contains(html, `data-slide="1"`) ||
+		!strings.Contains(html, fmt.Sprintf(`data-slide="%d"`, len(d.Slides))) {
 		t.Error("slides are not numbered in the markup")
 	}
 	if !strings.Contains(html, "--accent") {
@@ -58,7 +62,7 @@ func TestRenderWritesOneSectionPerSlide(t *testing.T) {
 }
 
 func TestRenderPassesSlideContentToLayouts(t *testing.T) {
-	_, html := renderSample(t)
+	_, html, _ := renderSample(t)
 
 	if !strings.Contains(html, "Unit economics against comparable sites") {
 		t.Error("slide titles are missing")
@@ -75,7 +79,7 @@ func TestRenderPassesSlideContentToLayouts(t *testing.T) {
 }
 
 func TestRenderCopiesDeckAssets(t *testing.T) {
-	out, html := renderSample(t)
+	out, html, _ := renderSample(t)
 
 	asset := filepath.Join(out, "assets", "throughput.svg")
 	if _, err := os.Stat(asset); err != nil {
@@ -87,7 +91,7 @@ func TestRenderCopiesDeckAssets(t *testing.T) {
 }
 
 func TestRenderCopiesThemeAssets(t *testing.T) {
-	out, _ := renderSample(t)
+	out, _, _ := renderSample(t)
 
 	if _, err := os.Stat(filepath.Join(out, "assets", "logo.svg")); err != nil {
 		t.Errorf("theme asset was not copied: %v", err)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/deck"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine"
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/gen"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/logx"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/render"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/theme"
@@ -77,6 +78,15 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	logger.Debug("loaded", "slides", len(d.Slides), "theme", th.Name, "layouts", th.LayoutNames())
+
+	// Generators run before rendering: each writes an image and sets the
+	// slide's media field, so layouts cannot tell a generated chart from an
+	// authored one.
+	genOpts := gen.Options{DeckRoot: opts.deckRoot, OutDir: opts.out, Tokens: th.Tokens()}
+	if err := gen.DefaultRegistry().Apply(context.Background(), engine.ExecRunner, d, genOpts); err != nil {
+		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
+		return exitError
+	}
 
 	renderOpts := render.Options{DeckRoot: opts.deckRoot, OutDir: opts.out, Lang: opts.lang}
 	if err := render.Render(d, th, renderOpts); err != nil {

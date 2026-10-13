@@ -169,3 +169,50 @@ func TestAssetAndFontDirsHangOffTheThemeDir(t *testing.T) {
 		t.Errorf("FontsDir = %q", th.FontsDir())
 	}
 }
+
+func TestTokensExtractsRootCustomProperties(t *testing.T) {
+	th, err := theme.Load(examplesRoot, "sample")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	tokens := th.Tokens()
+
+	if got := tokens["accent"]; got != "#2563eb" {
+		t.Errorf("tokens[accent] = %q, want #2563eb", got)
+	}
+	if _, ok := tokens["font-body"]; !ok {
+		t.Error("tokens is missing font-body")
+	}
+	// Leading dashes are stripped so a generator sees plain names.
+	if _, leaked := tokens["--accent"]; leaked {
+		t.Error("token names should not keep their leading dashes")
+	}
+	// Only :root declarations are tokens; a value scoped to a selector is the
+	// theme saying "this is not shared".
+	if _, leaked := tokens["marketing-only"]; leaked {
+		t.Error("a non-:root custom property leaked into tokens")
+	}
+}
+
+func TestTokensOnTooHandlesTypicalShapes(t *testing.T) {
+	root := writePartialTheme(t, map[string]string{
+		"theme.yaml":       "name: broken\n",
+		"slide.gohtml":     "<section></section>",
+		"css/base.css":     ":root{--a:1px;--b: two words ;}\n.scoped{--c:3;}\n:root { --d: #fff; }",
+		"layouts/x.gohtml": "<div></div>",
+	})
+	th, err := theme.Load(root, "broken")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	tokens := th.Tokens()
+
+	for name, want := range map[string]string{"a": "1px", "b": "two words", "d": "#fff"} {
+		if tokens[name] != want {
+			t.Errorf("tokens[%s] = %q, want %q", name, tokens[name], want)
+		}
+	}
+	if _, leaked := tokens["c"]; leaked {
+		t.Error("a selector-scoped property was treated as a token")
+	}
+}

@@ -63,6 +63,41 @@ page; a theme that overrode those rules would break pagination, which is why the
 document shell lives in the compiler and not in the theme. `make smoke-check`
 asserts PDF page count equals slide count and that the page size is unchanged.
 
+## Generator hook (charts and diagrams)
+
+A slide can declare `chart:` (or its alias `diagram:`) instead of a `media:`
+path. The compiler runs the generator before rendering and writes the result to
+the slide's `media` field, so layouts cannot tell a generated image from an
+authored one:
+
+```yaml
+chart:
+  generator: python        # python | cmd | mermaid
+  spec: charts/bars.py
+  data: data/throughput.csv
+  args: ["--title", "Units per week"]
+```
+
+The contract a generator honours:
+
+```
+<tool> <spec> --out <path> --tokens <json> [--data <path>] [args…]
+```
+
+**`--tokens` is the point of the hook.** It carries the theme's `:root` custom
+properties, so a chart is the deck's accent colour by construction rather than
+because someone remembered to match it. The same `bars.py` renders blue in the
+sample theme and cyan in a brand theme, with no edit.
+
+Output is content-addressed under `<out>/generated/<hash>.svg`; the key covers
+the spec, the data **and** the tokens, so changing the theme regenerates charts
+rather than serving a stale one. A generator that exits 0 without writing a
+non-empty file is treated as a failure, not a no-op.
+
+`mermaid` is registered but does not receive `--tokens` — `mmdc` themes through
+its own config, so diagrams inherit the brand less automatically than python
+charts do.
+
 ## Commands
 
 ```bash
@@ -108,6 +143,7 @@ internal/deck/                     content model and loader
 internal/theme/                    theme loading, template FuncMap
 internal/render/                   document shell + slide assembly (base.gohtml)
 internal/engine/                   Renderer port, Runner, PDF adapter
+internal/gen/                      generator hook (charts, diagrams) + cache
 internal/logx/                     slog construction
 examples/sample-deck/              brand-free fixture deck
 examples/themes/sample/            brand-free fixture theme
@@ -115,12 +151,11 @@ examples/themes/sample/            brand-free fixture theme
 
 ## Roadmap
 
-Implemented: content model, contract-free loading, theme + layouts, HTML, PDF,
-`doctor`, smoke check. Next, in order: remaining layouts and an explicit
-contract file; the generator hook (charts and diagrams rendered from specs with
-theme tokens injected); `check` — deterministic validators over the live DOM
-(overflow, out-of-bounds, overlap, contrast, fonts); `serve --watch`; PPTX in
-image mode; model-assisted review.
+Implemented: content model, theme + layouts, HTML, PDF, the generator hook,
+`doctor`, smoke check. Next, in order: an explicit contract file for deck.yaml;
+`check` — deterministic validators over the live DOM (overflow, out-of-bounds,
+overlap, contrast, fonts); `serve --watch`; PPTX in image mode; model-assisted
+review.
 
 ## Keeping this file current
 
