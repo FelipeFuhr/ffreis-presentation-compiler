@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="{{ .Lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ .Deck.Title }}</title>
+<style>
+/* Document shell — owned by the compiler, not the theme. These rules are what
+   make one slide equal one PDF page at the deck's physical size; a theme that
+   overrode them would break pagination. */
+@page { size: {{ .Size.WidthIn }}in {{ .Size.HeightIn }}in; margin: 0; }
+
+html, body { margin: 0; padding: 0; }
+
+.slide {
+  width: {{ .Size.WidthIn }}in;
+  height: {{ .Size.HeightIn }}in;
+  box-sizing: border-box;
+  overflow: hidden;
+  position: relative;
+  break-after: page;
+}
+.slide:last-child { break-after: auto; }
+
+/* On screen the deck reads as a stack of pages; in print this is inert. */
+@media screen {
+  body { background: #e9e7e2; }
+  .slide { margin: 0 auto 0.3in; box-shadow: 0 0.08in 0.3in rgba(0,0,0,.12); }
+  body > .slide:first-child { margin-top: 0.3in; }
+}
+</style>
+<style>
+{{ .CSS }}
+</style>
+</head>
+<body>
+{{ range .Sections }}
+{{ . }}
+{{ end }}
+</body>
+</html>

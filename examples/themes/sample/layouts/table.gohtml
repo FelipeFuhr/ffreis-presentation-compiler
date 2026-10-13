@@ -1,0 +1,24 @@
+{{- /* table. Fields: columns (sequence), rows (sequence of sequences),
+       highlight_row (1-based, optional), source (optional note). */ -}}
+{{- $highlight := int (get .Fields "highlight_row") -}}
+<table class="deck-table">
+  <thead>
+    <tr>
+    {{- range list (get .Fields "columns") }}
+      <th>{{ str . }}</th>
+    {{- end }}
+    </tr>
+  </thead>
+  <tbody>
+  {{- range $i, $row := rows (get $.Fields "rows") }}
+    <tr{{ if eq (add $i 1) $highlight }} class="is-highlighted"{{ end }}>
+    {{- range $row }}
+      <td>{{ str . }}</td>
+    {{- end }}
+    </tr>
+  {{- end }}
+  </tbody>
+</table>
+{{- with get .Fields "source" }}
+<p class="table-source">{{ str . }}</p>
+{{- end }}

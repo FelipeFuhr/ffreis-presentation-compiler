@@ -1,0 +1,89 @@
+/* Slide chrome and shared components. Layout-specific rules live in 30-layouts.css. */
+
+.slide {
+  padding: var(--margin);
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--size-body);
+  line-height: 1.45;
+  display: flex;
+  flex-direction: column;
+}
+
+.kicker {
+  margin: 0 0 0.1in;
+  font-size: var(--size-kicker);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+
+.slide-title {
+  margin: 0 0 0.12in;
+  font-size: var(--size-title);
+  line-height: 1.08;
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+
+.rule {
+  width: 0.55in;
+  height: 3px;
+  margin: 0 0 var(--gap);
+  border: 0;
+  background: var(--accent);
+}
+
+/* The body box is what the overflow validator measures, so it must be the
+   element that actually clips. */
+.slide-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.badge {
+  position: absolute;
+  top: var(--margin);
+  right: var(--margin);
+  height: 0.42in;
+  width: auto;
+}
+
+.phase {
+  position: absolute;
+  top: var(--margin);
+  right: calc(var(--margin) + 0.6in);
+  padding: 0.04in 0.14in;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 9pt;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.slide-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 0.18in;
+  color: var(--muted);
+  font-size: 8.5pt;
+  letter-spacing: 0.06em;
+}
+
+/* Full-bleed slides (cover, section) opt out of chrome entirely. */
+.slide--bare {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: var(--paper);
+}
+
+p { margin: 0 0 0.14in; }
+p:last-child { margin-bottom: 0; }
+strong { color: var(--ink-strong); }

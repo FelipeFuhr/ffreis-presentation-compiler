@@ -2,3 +2,6 @@ dist/
 .bin/
 *.out
 coverage.out
+
+# Binary produced by a bare `go build ./...` in the repo root.
+/ffreis-presentation-compiler

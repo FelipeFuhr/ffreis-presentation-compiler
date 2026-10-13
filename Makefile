@@ -4,7 +4,12 @@ GOFMT ?= gofmt
 GOLANGCI_LINT ?= golangci-lint
 GITLEAKS ?= gitleaks
 GOVULNCHECK ?= govulncheck
-COVERAGE_MIN ?= 90
+# 85, not the fleet-default 90: the uncovered remainder is cli.Run (an os.Exit
+# wrapper) and the adapter success paths, which only execute with a browser
+# installed. Those are covered by `make smoke-check`, which actually renders a
+# PDF, rather than by a unit test that would silently pass on a machine with no
+# Chrome. Same reasoning ffreis-resume documents for its own lowered floor.
+COVERAGE_MIN ?= 85
 
 LEFTHOOK_VERSION ?= 1.7.10
 LEFTHOOK_DIR ?= $(CURDIR)/.bin
@@ -20,7 +25,8 @@ MUTATION_THRESHOLD ?= 60
 	lefthook-bootstrap lefthook-install lefthook-run lefthook setup \
 
 	ci-list install-act ci-local \
-	init-github
+	init-github \
+	install build doctor smoke-check
 
 ## mutation: run mutation testing with gremlins (slow — CI only)
 mutation:
@@ -137,3 +143,40 @@ init-github: ## Apply standard fleet settings to the GitHub repo (SHA-pinning, s
 	@repo=$$(git remote get-url origin 2>/dev/null | sed -E 's|.*github\.com[:/]||; s|\.git$$||'); \
 	[ -n "$$repo" ] || { echo "No GitHub remote found" >&2; exit 1; }; \
 	bash "$(QUALITY_KIT_SCRIPTS)/configure-repo-settings.sh" "$$repo"
+
+# ── Domain targets ───────────────────────────────────────────────────────────
+BINARY      ?= ffreis-presentation-compiler
+EXAMPLE_DECK   ?= examples/sample-deck
+EXAMPLE_THEMES ?= examples/themes
+SMOKE_OUT   ?= .bin/smoke
+
+install: ## Install the CLI into GOBIN
+	@go install ./cmd/$(BINARY)
+
+build: ## Render the example deck (override DECK=/path THEMES=/path OUT=/path)
+	@go run ./cmd/$(BINARY) build \
+		-deck-root "$(or $(DECK),$(EXAMPLE_DECK))" \
+		-theme-root "$(or $(THEMES),$(EXAMPLE_THEMES))" \
+		-out "$(or $(OUT),dist)" \
+		-formats "$(or $(FORMATS),html,pdf)"
+
+doctor: ## Report which render adapters are available on this machine
+	@go run ./cmd/$(BINARY) doctor
+
+smoke-check: ## End-to-end: render the example deck and assert the PDF paginates
+	@rm -rf "$(SMOKE_OUT)" && mkdir -p "$(SMOKE_OUT)"
+	@go run ./cmd/$(BINARY) build -deck-root "$(EXAMPLE_DECK)" \
+		-theme-root "$(EXAMPLE_THEMES)" -out "$(SMOKE_OUT)" -formats html,pdf >/dev/null
+	@test -s "$(SMOKE_OUT)/index.html" || { echo "smoke: no index.html" >&2; exit 1; }
+	@slides=$$(grep -c '<section' "$(SMOKE_OUT)/index.html"); \
+	pdf="$(SMOKE_OUT)/$$(basename $(EXAMPLE_DECK)).pdf"; \
+	test -s "$$pdf" || { echo "smoke: no pdf at $$pdf" >&2; exit 1; }; \
+	if command -v pdfinfo >/dev/null 2>&1; then \
+		pages=$$(pdfinfo "$$pdf" | awk '/^Pages:/ {print $$2}'); \
+		size=$$(pdfinfo "$$pdf" | sed -n 's/^Page size: *//p'); \
+		[ "$$pages" = "$$slides" ] || { echo "smoke: $$slides slides but $$pages pdf pages" >&2; exit 1; }; \
+		case "$$size" in 960*x*540*) ;; *) echo "smoke: unexpected page size: $$size" >&2; exit 1 ;; esac; \
+		echo "smoke: ok — $$pages pages at $$size"; \
+	else \
+		echo "smoke: ok — $$slides slides rendered (install poppler-utils to assert pagination)"; \
+	fi

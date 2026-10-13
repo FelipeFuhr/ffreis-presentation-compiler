@@ -1,18 +1,7 @@
+// Command ffreis-presentation-compiler compiles declarative slide decks
+// (YAML + Markdown + a brand theme) into HTML, PDF and PNG.
 package main
 
-import (
-	"fmt"
-	"os"
-)
+import "github.com/FelipeFuhr/ffreis-presentation-compiler/internal/cli"
 
-func main() {
-	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func run() error {
-	fmt.Println("ffreis-presentation-compiler: replace this with your command logic")
-	return nil
-}
+func main() { cli.Run() }

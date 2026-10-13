@@ -6,6 +6,46 @@
 
 Compiles declarative slide decks (YAML + Markdown + a brand theme) to HTML, PDF and PNG.
 
+A slide is front-matter plus prose, not a pile of coordinates:
+
+```markdown
+---
+layout: table
+kicker: Benchmark
+title: Unit economics against comparable sites
+columns: [Site, Units / week, Unit cost, Lead time]
+rows:
+  - [Site A (ours), "12,400", "R$ 8.10", "6.2 days"]
+  - [Site B, "11,900", "R$ 8.90", "4.1 days"]
+highlight_row: 1
+source: Internal operations reporting, Q3.
+---
+```
+
+The browser handles layout, text reflow and pagination; the theme owns the
+design; the compiler owns page geometry, so one slide is always exactly one PDF
+page.
+
+## Quick start
+
+```bash
+make doctor        # check a browser is available for the PDF path
+make build         # render the bundled example deck into dist/
+make smoke-check   # render + assert PDF page count equals slide count
+```
+
+Against your own content:
+
+```bash
+go run ./cmd/ffreis-presentation-compiler build \
+  -deck-root path/to/deck -theme-root path/to/themes \
+  -out dist -formats html,pdf
+```
+
+The engine is consumer-agnostic: decks and themes are flags, and no brand is
+hardcoded. See [`AGENTS.md`](AGENTS.md) for the deck/theme contract and
+`examples/` for a working pair.
+
 ## Development
 
 This repo follows the fleet standards — git hooks (lefthook) and CI are consumed

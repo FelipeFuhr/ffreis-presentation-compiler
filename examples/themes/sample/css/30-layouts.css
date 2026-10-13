@@ -1,0 +1,147 @@
+/* ── cover ───────────────────────────────────────────────────────────────── */
+.cover-kicker {
+  margin: 0 0 0.22in;
+  font-size: 13pt;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+.cover-title {
+  margin: 0 0 0.18in;
+  font-size: 34pt;
+  line-height: 1.08;
+  font-weight: 700;
+  color: var(--ink-strong);
+  max-width: 9in;
+}
+.cover-subtitle {
+  margin: 0;
+  font-size: 15.5pt;
+  color: var(--muted);
+}
+.cover-rule {
+  width: 0.5in;
+  height: 3px;
+  margin: 0.3in auto;
+  border: 0;
+  background: var(--accent);
+}
+.cover-meta {
+  position: absolute;
+  bottom: var(--margin);
+  left: 0;
+  right: 0;
+  font-size: var(--size-small);
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+
+/* ── section divider ─────────────────────────────────────────────────────── */
+.section-label {
+  margin: 0 0 0.12in;
+  font-size: 13pt;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+.section-title {
+  margin: 0;
+  font-size: 28pt;
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+
+/* ── bullets ─────────────────────────────────────────────────────────────── */
+.bullets { margin: 0; padding: 0; list-style: none; }
+.bullets li {
+  position: relative;
+  padding-left: 0.34in;
+  margin-bottom: 0.2in;
+}
+.bullets li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.08in;
+  width: 0.14in;
+  height: 0.14in;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* ── table ───────────────────────────────────────────────────────────────── */
+.deck-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12pt;
+}
+.deck-table th {
+  background: var(--ink-strong);
+  color: #fff;
+  font-weight: 700;
+  text-align: left;
+}
+.deck-table th,
+.deck-table td {
+  padding: 0.09in 0.12in;
+  border: 1px solid var(--hairline);
+  vertical-align: middle;
+}
+.deck-table tbody tr:nth-child(odd) td { background: var(--paper); }
+.deck-table tbody tr.is-highlighted td {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 700;
+}
+.table-source {
+  margin-top: 0.16in;
+  font-size: 9.5pt;
+  color: var(--muted);
+}
+
+/* ── split: media beside commentary ──────────────────────────────────────── */
+.split {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: var(--gap);
+  height: 100%;
+}
+.split-media {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.14in;
+  background: #fff;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  min-height: 0;
+}
+.split-media img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.split-copy { align-self: center; }
+
+/* ── hero media ──────────────────────────────────────────────────────────── */
+.hero-media {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 0;
+}
+.hero-media img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.media-caption {
+  margin-top: 0.16in;
+  text-align: center;
+  font-size: 9.5pt;
+  font-style: italic;
+  color: var(--muted);
+}

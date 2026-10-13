@@ -1,0 +1,8 @@
+{{- /* section: a divider between parts of the deck. */ -}}
+<div>
+  {{- with .Slide.Kicker }}
+  <p class="section-label">{{ . }}</p>
+  {{- end }}
+  <h2 class="section-title">{{ .Slide.Title }}</h2>
+  {{ .Body }}
+</div>
