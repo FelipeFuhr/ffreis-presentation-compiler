@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/deck"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine"
@@ -106,7 +107,7 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	job := engine.Job{IndexPath: index, OutDir: opts.out, Slug: opts.slug, Size: size}
-	if err := renderFormats(context.Background(), formats, job, stdout); err != nil {
+	if err := renderFormats(context.Background(), formats, job, speakerNotes(d), stdout); err != nil {
 		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
 		return exitError
 	}
@@ -116,9 +117,30 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 // renderFormats runs each requested adapter, printing the artifact path it
 // produced. A failing adapter aborts the build rather than leaving a partial
 // set of artifacts that looks complete.
-func renderFormats(ctx context.Context, formats []engine.Format, job engine.Job, stdout io.Writer) error {
+// speakerNotes composes what each slide carries into a PPTX notes page. The
+// image-mode export has no selectable text, so this is the only place the words
+// survive — title first, then whatever the author wrote in `notes`.
+func speakerNotes(d *deck.Deck) map[int]string {
+	notes := make(map[int]string, len(d.Slides))
+	for _, s := range d.Slides {
+		var parts []string
+		if s.Kicker != "" {
+			parts = append(parts, s.Kicker)
+		}
+		if s.Title != "" {
+			parts = append(parts, s.Title)
+		}
+		if s.Notes != "" {
+			parts = append(parts, "", s.Notes)
+		}
+		notes[s.Number] = strings.Join(parts, "\n")
+	}
+	return notes
+}
+
+func renderFormats(ctx context.Context, formats []engine.Format, job engine.Job, notes map[int]string, stdout io.Writer) error {
 	for _, f := range formats {
-		r, err := rendererFor(f)
+		r, err := rendererFor(f, notes)
 		if err != nil {
 			return err
 		}
@@ -135,10 +157,16 @@ func renderFormats(ctx context.Context, formats []engine.Format, job engine.Job,
 	return nil
 }
 
-func rendererFor(f engine.Format) (engine.Renderer, error) {
+func rendererFor(f engine.Format, notes map[int]string) (engine.Renderer, error) {
 	switch f {
 	case engine.FormatPDF:
 		return engine.NewPDFRenderer(), nil
+	case engine.FormatPNG:
+		return engine.NewPNGRenderer(), nil
+	case engine.FormatPPTX:
+		r := engine.NewPPTXRenderer()
+		r.Notes = notes
+		return r, nil
 	default:
 		return nil, fmt.Errorf("format %q is declared but has no adapter yet", f)
 	}

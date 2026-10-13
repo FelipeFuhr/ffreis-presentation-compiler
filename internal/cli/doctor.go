@@ -17,7 +17,7 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 
-	renderers := []engine.Renderer{engine.NewPDFRenderer()}
+	renderers := []engine.Renderer{engine.NewPDFRenderer(), engine.NewPNGRenderer(), engine.NewPPTXRenderer()}
 
 	allReady := true
 	_, _ = fmt.Fprintln(stdout, "format  tool                  status")

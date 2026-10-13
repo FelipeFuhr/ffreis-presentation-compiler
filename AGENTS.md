@@ -54,7 +54,8 @@ construction is unit-tested with no browser installed.
 |---|---|---|
 | HTML | — | pure Go (`html/template`); always produced |
 | PDF | `google-chrome` (or `chromium`) | `--headless=new --print-to-pdf`; one slide per page |
-| PNG | — | not implemented yet; `-formats png` fails loudly rather than silently skipping |
+| PNG | Chrome over CDP | one image per slide in `slides/`, at 2x CSS resolution |
+| PPTX | Chrome over CDP | image mode: one full-bleed render per slide, text kept in speaker notes |
 
 **Page geometry is the load-bearing detail.** `internal/render/base.gohtml`
 emits `@page { size: <W>in <H>in; margin: 0 }` and gives `.slide` exactly those
@@ -98,6 +99,32 @@ non-empty file is treated as a failure, not a no-op.
 its own config, so diagrams inherit the brand less automatically than python
 charts do.
 
+## PPTX export
+
+`-formats pptx` writes a PowerPoint file in **image mode**: each slide is the
+render, and the slide's kicker, title and `notes` are preserved as speaker
+notes. Fidelity is exact; nothing is editable. The deck source stays the
+editable artefact — this is for handing a file to someone who expects `.pptx`.
+
+**The non-obvious part is the zip, not the XML.** `archive/zip`'s ordinary
+`Create`/`CreateHeader` path streams each entry and appends a *data descriptor*,
+setting general-purpose bit 3 and leaving CRC and sizes zero in the local
+header. That is valid ZIP, and python-pptx reads such a file without complaint —
+but LibreOffice refuses the whole document with nothing but "source file could
+not be loaded". `internal/engine/pptx` therefore compresses each part up front
+and writes through `CreateRaw` with CRC and sizes populated. `pptx_test.go`
+asserts bit 3 is clear on every local header, because the failure mode gives you
+no clue where to look.
+
+Two smaller requirements learned the same way: `[Content_Types].xml` must be the
+first entry, and `FileHeader.Modified` must be set — the zero value writes month
+0, day 0, which is not a real date. A fixed epoch also makes the output
+reproducible.
+
+`make export-selftest` round-trips the generated file through LibreOffice and
+fails if it will not open, which is the only check that would have caught any of
+this.
+
 ## Checks (`check`)
 
 `check` measures a **rendered** deck over CDP — it reads `dist/index.html`
@@ -134,6 +161,7 @@ make build           # render the example deck (override DECK= THEMES= OUT= FORM
 make smoke-check     # end-to-end render + pagination assertion
 make check           # render the example deck and measure it
 make check-selftest  # prove the checker still catches all six rules
+make export-selftest # prove the generated pptx actually opens
 make doctor          # which adapters are available here
 ```
 
@@ -168,8 +196,10 @@ internal/cli/                      dispatch + per-subcommand flag sets
 internal/deck/                     content model and loader
 internal/theme/                    theme loading, template FuncMap
 internal/render/                   document shell + slide assembly (base.gohtml)
-internal/check/                    measured checks (probe.js) + chromedp browser
-internal/engine/                   Renderer port, Runner, PDF adapter
+internal/check/                    measured checks (probe.js)
+internal/engine/                   Renderer port, Runner, PDF/PNG/PPTX adapters
+internal/engine/chrome/            CDP client — slide-agnostic, shared by check and the adapters
+internal/engine/pptx/              OOXML writer (assets/ holds the static parts)
 internal/gen/                      generator hook (charts, diagrams) + cache
 internal/logx/                     slog construction
 examples/sample-deck/              brand-free fixture deck
@@ -180,11 +210,11 @@ examples/themes/check-fixture/     deliberately broken theme, ditto
 
 ## Roadmap
 
-Implemented: content model, theme + layouts, HTML, PDF, the generator hook,
-`check`, `doctor`, smoke check and check self-test. Next, in order: an explicit
-contract file for deck.yaml; an `overlap` rule (deferred — parent/child and
-absolutely-positioned chrome make it the most false-positive-prone of the set);
-`serve --watch`; PPTX in image mode; model-assisted review.
+Implemented: content model, theme + layouts, HTML, PDF, PNG, PPTX (image mode),
+the generator hook, `check`, `doctor`, and three self-tests. Next, in order: an
+explicit contract file for deck.yaml; an `overlap` rule (deferred — parent/child
+and absolutely-positioned chrome make it the most false-positive-prone of the
+set); `serve --watch`; model-assisted review.
 
 ## Keeping this file current
 

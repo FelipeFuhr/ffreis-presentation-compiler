@@ -10,6 +10,7 @@ import (
 
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/deck"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine"
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine/chrome"
 )
 
 // stubLookPath makes tool availability deterministic for the duration of a test.
@@ -185,4 +186,123 @@ func TestExecRunnerSurfacesCommandFailure(t *testing.T) {
 	if err := engine.ExecRunner(context.Background(), "true"); err != nil {
 		t.Errorf("want success from `true`, got %v", err)
 	}
+}
+
+// fakeCapturer stands in for headless Chrome.
+type fakeCapturer struct {
+	shots    []chrome.Shot
+	err      error
+	selector string
+	scale    float64
+}
+
+func (f *fakeCapturer) CaptureAll(_ context.Context, _, selector string, scale float64) ([]chrome.Shot, error) {
+	f.selector, f.scale = selector, scale
+	return f.shots, f.err
+}
+
+func twoShots() []chrome.Shot {
+	return []chrome.Shot{{Index: 1, PNG: []byte("\x89PNG-one")}, {Index: 2, PNG: []byte("\x89PNG-two")}}
+}
+
+func TestPNGRendererWritesOneFilePerSlide(t *testing.T) {
+	stubLookPath(t, true)
+	job := newJob(t)
+	cap := &fakeCapturer{shots: twoShots()}
+	r := &engine.PNGRenderer{Client: cap, Scale: 3}
+
+	dir, err := r.Render(context.Background(), job)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if filepath.Base(dir) != engine.SlidesDir {
+		t.Errorf("Render returned %q, want the slides dir", dir)
+	}
+	for _, name := range []string{"01.png", "02.png"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s was not written: %v", name, err)
+		}
+	}
+	if cap.selector != engine.SlideSelector {
+		t.Errorf("captured %q, want %q", cap.selector, engine.SlideSelector)
+	}
+	if cap.scale != 3 {
+		t.Errorf("scale = %v, want the configured 3", cap.scale)
+	}
+	if r.Format() != engine.FormatPNG {
+		t.Errorf("Format() = %q", r.Format())
+	}
+}
+
+func TestPNGRendererDefaultsTheScale(t *testing.T) {
+	stubLookPath(t, true)
+	cap := &fakeCapturer{shots: twoShots()}
+	r := &engine.PNGRenderer{Client: cap}
+	if _, err := r.Render(context.Background(), newJob(t)); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if cap.scale != engine.DefaultPNGScale {
+		t.Errorf("scale = %v, want the default %v", cap.scale, engine.DefaultPNGScale)
+	}
+}
+
+func TestPPTXRendererBuildsADeckWithNotes(t *testing.T) {
+	stubLookPath(t, true)
+	job := newJob(t)
+	r := &engine.PPTXRenderer{
+		Client: &fakeCapturer{shots: twoShots()},
+		Notes:  map[int]string{1: "first", 2: "second"},
+	}
+
+	path, err := r.Render(context.Background(), job)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if filepath.Base(path) != "deck.pptx" {
+		t.Errorf("Render returned %q, want the slug-named pptx", path)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Size() == 0 {
+		t.Fatalf("pptx was not written: %v", err)
+	}
+	if r.Format() != engine.FormatPPTX {
+		t.Errorf("Format() = %q", r.Format())
+	}
+}
+
+func TestExportAdapterFailureModes(t *testing.T) {
+	t.Run("png without a browser", func(t *testing.T) {
+		stubLookPath(t, false)
+		_, err := engine.NewPNGRenderer().Render(context.Background(), newJob(t))
+		if err == nil || !strings.Contains(err.Error(), "no browser found") {
+			t.Fatalf("want a \"no browser found\" error, got %v", err)
+		}
+	})
+
+	t.Run("pptx without a browser", func(t *testing.T) {
+		stubLookPath(t, false)
+		_, err := engine.NewPPTXRenderer().Render(context.Background(), newJob(t))
+		if err == nil || !strings.Contains(err.Error(), "no browser found") {
+			t.Fatalf("want a \"no browser found\" error, got %v", err)
+		}
+	})
+
+	t.Run("capture fails", func(t *testing.T) {
+		stubLookPath(t, true)
+		r := &engine.PNGRenderer{Client: &fakeCapturer{err: errors.New("chrome exploded")}}
+		if _, err := r.Render(context.Background(), newJob(t)); err == nil ||
+			!strings.Contains(err.Error(), "chrome exploded") {
+			t.Fatalf("want the capture error surfaced, got %v", err)
+		}
+	})
+
+	t.Run("missing index.html", func(t *testing.T) {
+		stubLookPath(t, true)
+		job := newJob(t)
+		job.IndexPath = filepath.Join(t.TempDir(), "absent.html")
+		if _, err := (&engine.PPTXRenderer{Client: &fakeCapturer{shots: twoShots()}}).
+			Render(context.Background(), job); err == nil {
+			t.Fatal("want an error when the rendered HTML is missing")
+		}
+	})
 }
