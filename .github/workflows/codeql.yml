@@ -1,0 +1,20 @@
+name: CodeQL
+
+on:
+  schedule:
+    - cron: "0 0 * * 1"
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-codeql.yml@3858e9e74c805067e454740b195372c7195f333b # v1.5.0
+    with:
+      languages: "go"

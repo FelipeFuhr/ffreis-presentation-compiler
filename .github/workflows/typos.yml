@@ -1,0 +1,14 @@
+name: Typos
+
+on:
+  pull_request:
+    paths: ["**/*.md", "**/*.toml", "**/*.yaml", "**/*.yml", "**/*.go", "**/*.rs", "**/*.py", "**/*.java", "**/*.ts", "**/*.tsx"]
+  push:
+    branches: [main, master, develop]
+    paths: ["**/*.md", "**/*.toml", "**/*.yaml", "**/*.yml", "**/*.go", "**/*.rs", "**/*.py", "**/*.java", "**/*.ts", "**/*.tsx"]
+
+jobs:
+  typos:
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-typos.yml@8ff19efd329b76bce5ff5b98074b9aec74b239da # v1.8.1
+    permissions:
+      contents: read

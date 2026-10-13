@@ -1,0 +1,6 @@
+# CODEOWNERS — every PR automatically requests review from the listed owners.
+# Syntax: <path_pattern> <@owner>...
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+* @FelipeFuhr

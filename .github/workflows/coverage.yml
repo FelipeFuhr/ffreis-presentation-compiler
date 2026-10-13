@@ -1,0 +1,34 @@
+name: Code Coverage (Codecov)
+
+on:
+  pull_request:
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/**'
+  push:
+    branches: [main, master]
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Makefile'
+      - '.github/workflows/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    if: ${{ !github.event.pull_request.draft }}
+
+    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-coverage.yml@e9b9cc0cde6465b785f4b7c71d2180f5b265f42f
+    with:
+      go-version: "1.25.8"
+      working-directory: "."
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

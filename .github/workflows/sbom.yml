@@ -1,0 +1,16 @@
+name: SBOM
+
+on:
+  push:
+    branches: [main, master, develop]
+  release:
+    types: [published]
+
+jobs:
+  sbom:
+    permissions:
+      contents: read
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-sbom.yml@8ff19efd329b76bce5ff5b98074b9aec74b239da
+    with:
+      artifact-name: "ffreis-presentation-compiler-sbom"
+      format: "spdx-json"

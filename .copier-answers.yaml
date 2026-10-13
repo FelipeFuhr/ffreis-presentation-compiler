@@ -1,0 +1,25 @@
+# Changes here will be overwritten by Copier; NEVER edit manually.
+# Recorded by `copier copy`; refresh with `copier update` to pull template changes.
+_src_path: /media/ffreis/second/projects/platform/ffreis-project-templates/templates/go-cli
+coverage_min: 90
+description: Compiles declarative slide decks (YAML + Markdown + a brand theme) to
+    HTML, PDF and PNG.
+github_org: FelipeFuhr
+go_full_version: 1.25.8
+go_module_path: github.com/FelipeFuhr/ffreis-presentation-compiler
+go_version: '1.25'
+has_docker: false
+has_e2e: false
+has_fuzz: false
+has_generate_target: false
+lefthook_version: 1.7.10
+mutation_packages: ./internal/...
+mutation_threshold: 60
+platform_standards_version: v1.6.0
+repo_name: ffreis-presentation-compiler
+workflows_container_sha: f17453949fd409a1e3a5d90fd4f2d0313c1b6088
+workflows_general_sha: 8ff19efd329b76bce5ff5b98074b9aec74b239da
+workflows_go_sha: b253b2329a11552b6276781c56f6dc6fd1718710
+workflows_go_sha_alt: e9b9cc0cde6465b785f4b7c71d2180f5b265f42f
+workflows_go_sha_mutation: ed2f7d29467bf1fd6ec40df3953b3ee128ba3f04
+

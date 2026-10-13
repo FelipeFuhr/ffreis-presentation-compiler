@@ -1,0 +1,58 @@
+name: DevOps / PR Hygiene
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  semantic-pr:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-semantic-pr.yml@3858e9e74c805067e454740b195372c7195f333b # v1.5.0
+
+  actionlint:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-actionlint.yml@3858e9e74c805067e454740b195372c7195f333b # v1.5.0
+    with:
+      working-directory: "."
+
+  labeler:
+    if: github.event_name == 'pull_request_target'
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-labeler.yml@3858e9e74c805067e454740b195372c7195f333b # v1.5.0
+    with:
+      rules-json: |-
+        [
+          {"label":"ci","patterns":[".github/workflows/**",".github/actions/**"]},
+          {"label":"go","patterns":["**/*.go","go.mod","go.sum"]},
+          {"label":"docker","patterns":["Dockerfile","Containerfile","docker/**",".docker/**"]},
+          {"label":"docs","patterns":["**/*.md"]}
+        ]
+
+  pr-size:
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-pr-size.yml@8ff19efd329b76bce5ff5b98074b9aec74b239da # v1.8.1
+
+  dependency-review:
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-dependency-review.yml@8ff19efd329b76bce5ff5b98074b9aec74b239da # v1.8.1

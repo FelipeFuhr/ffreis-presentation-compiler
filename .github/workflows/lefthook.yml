@@ -1,0 +1,32 @@
+name: Lefthook
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lefthook:
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-lefthook.yml@3858e9e74c805067e454740b195372c7195f333b # v1.5.0
+    with:
+      working-directory: "."
+      go-version: "1.25.8"
+      lefthook-bootstrap-command: "make lefthook-bootstrap"
+      lefthook-bin: ".bin/lefthook"

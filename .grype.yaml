@@ -1,0 +1,10 @@
+# Exclude the grype binary itself from its own scan — grype installed to the
+# runner PATH (GHA: /usr/local/bin/grype; host/act: /bin/grype) is outside the
+# project tree but shows up as a finding when grype scans dir:. on some runners.
+ignore:
+  - location:
+      path: "/bin/grype"
+  - location:
+      path: "/usr/local/bin/grype"
+  - location:
+      path: "/usr/bin/grype"

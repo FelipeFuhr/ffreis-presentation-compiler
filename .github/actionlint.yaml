@@ -1,0 +1,4 @@
+# Baseline actionlint config for the ffreis fleet.
+self-hosted-runner:
+  labels: []
+config-variables: null   # allow any ${{ vars.* }} without 'undefined' errors

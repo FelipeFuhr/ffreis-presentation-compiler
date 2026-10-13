@@ -1,0 +1,14 @@
+remotes:
+  - git_url: https://github.com/FelipeFuhr/ffreis-platform-standards
+    ref: v1.6.0
+    configs:
+      - lefthook/base.yml
+      - lefthook/go.yml
+
+pre-push:
+  parallel: false
+  commands:
+    quality-gates:
+      run: make quality-gates
+    generated-drift:
+      run: make hook-generated-drift

@@ -1,0 +1,11 @@
+# lefthook (see lefthook.yml) is this repo's hook runner — this file is NOT
+# the primary hook config. It exists only so lefthook's `pre-commit-compat`
+# bridge hook (pulled from ffreis-platform-standards lefthook/base.yml) has a
+# valid file to parse if/when one is present: that hook does
+# `[ -f .pre-commit-config.yaml ] || exit 0` then `pre-commit run`, and a
+# bare `repos:` (no value) parses as YAML null, which pre-commit's config
+# loader rejects ("Expected array but got 'NoneType'") — failing EVERY
+# commit. Keep this as `repos: []` unless this repo genuinely adopts
+# pre-commit-native hooks (e.g. Python repos wiring ruff/mypy/pytest as
+# `local` hooks) — see stock/ffreis-stock-simulator for a populated example.
+repos: []

@@ -1,0 +1,49 @@
+name: DevOps / Automation
+
+on:
+  schedule:
+    - cron: "0 3 25-31 * 0"  # last Sunday of month, 03:00 UTC
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scorecard:
+    if: vars.SCORECARD_ENABLED == 'true' && github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+      id-token: write
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-scorecard.yml@3858e9e74c805067e454740b195372c7195f333b # v1.5.0
+    with:
+      upload-sarif: true
+
+  stale:
+    if: vars.STALE_ENABLED == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-stale.yml@3858e9e74c805067e454740b195372c7195f333b # v1.5.0
+    with:
+      only: "both"
+
+  release-please:
+    if: vars.RELEASE_PLEASE_ENABLED == 'true' && github.event_name == 'push'
+    permissions:
+      contents: write
+      pull-requests: write
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-release-please.yml@3858e9e74c805067e454740b195372c7195f333b # v1.5.0
+    with:
+      target-branch: "main"
+    secrets:
+      RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+
