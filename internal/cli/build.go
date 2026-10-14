@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/contract"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/deck"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/gen"
@@ -82,6 +83,20 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 	}
 	logger.Debug("loaded", "slides", len(d.Slides), "theme", th.Name, "layouts", th.LayoutNames())
 
+	// Validate before anything renders: a bad field here is a named finding,
+	// not a blank region or a confusing template error three steps downstream.
+	if findings := contract.Validate(d, th, opts.deckRoot); len(findings) > 0 {
+		_, _ = fmt.Fprint(stderr, contract.Report(findings))
+		return exitError
+	}
+
+	// Beside the contract check, not after the generators: neither reads
+	// generated output, and a published deck with a bad description should fail
+	// before anything spends time shelling out to a chart generator.
+	if code := reportSEO(d, opts, stdout, stderr); code != exitOK {
+		return code
+	}
+
 	// Generators run before rendering: each writes an image and sets the
 	// slide's media field, so layouts cannot tell a generated chart from an
 	// authored one.
@@ -89,10 +104,6 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 	if err := gen.DefaultRegistry().Apply(context.Background(), engine.ExecRunner, d, genOpts); err != nil {
 		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
 		return exitError
-	}
-
-	if code := reportSEO(d, opts, stdout, stderr); code != exitOK {
-		return code
 	}
 
 	renderOpts := render.Options{

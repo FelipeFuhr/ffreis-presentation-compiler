@@ -41,6 +41,7 @@ MUTATION_THRESHOLD ?= 60
 	ci-list install-act ci-local \
 	init-github \
 	install build doctor smoke-check check check-selftest export-selftest \
+	validate-deck validate-selftest \
 	seo-selftest seo-audit
 
 ## mutation: run mutation testing with gremlins (slow — CI only)
@@ -163,6 +164,7 @@ init-github: ## Apply standard fleet settings to the GitHub repo (SHA-pinning, s
 BINARY      ?= ffreis-presentation-compiler
 EXAMPLE_DECK   ?= examples/sample-deck
 EXAMPLE_THEMES ?= examples/themes
+CONTRACT_FIXTURE ?= examples/contract-fixture
 SMOKE_OUT   ?= .bin/smoke
 
 install: ## Install the CLI into GOBIN
@@ -219,6 +221,24 @@ check-selftest: ## Prove the checker is not vacuous: the broken fixture must fai
 		echo "$$out" >&2; exit 1; \
 	fi; \
 	echo "check-selftest: ok — all 6 rules fired on the broken fixture"
+
+validate-deck: ## Validate a deck's contract before build (override DECK= THEMES=)
+	@go run ./cmd/$(BINARY) validate \
+		-deck-root "$(or $(DECK),$(EXAMPLE_DECK))" \
+		-theme-root "$(or $(THEMES),$(EXAMPLE_THEMES))"
+
+validate-selftest: ## Prove the validator is not vacuous: the broken fixture must fail every rule
+	@out=$$(go run ./cmd/$(BINARY) validate -deck-root "$(CONTRACT_FIXTURE)" \
+		-theme-root "$(EXAMPLE_THEMES)" 2>&1 || true); \
+	missing=""; \
+	for rule in unknown-layout missing-field unknown-field missing-asset unsafe-path; do \
+		echo "$$out" | grep -q "$$rule" || missing="$$missing $$rule"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "validate-selftest: the fixture did not trigger:$$missing" >&2; \
+		echo "$$out" >&2; exit 1; \
+	fi; \
+	echo "validate-selftest: ok — all 5 rules fired on the broken fixture"
 
 export-selftest: ## Prove the PPTX actually opens: round-trip it through LibreOffice
 	@command -v soffice >/dev/null 2>&1 || { echo "export-selftest: soffice not installed — skipping" >&2; exit 0; }

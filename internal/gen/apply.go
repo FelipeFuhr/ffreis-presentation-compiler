@@ -29,7 +29,7 @@ type Options struct {
 func (r Registry) Apply(ctx context.Context, run Runner, d *deck.Deck, opts Options) error {
 	for i := range d.Slides {
 		s := &d.Slides[i]
-		spec, key, err := specOf(s)
+		spec, key, err := SpecOf(s)
 		if err != nil {
 			return fmt.Errorf("slide %d (%s): %w", s.Number, s.Source, err)
 		}
@@ -51,9 +51,11 @@ func (r Registry) Apply(ctx context.Context, run Runner, d *deck.Deck, opts Opti
 	return nil
 }
 
-// specOf extracts a generator spec from a slide's fields, returning the key it
-// came from for error messages.
-func specOf(s *deck.Slide) (*Spec, string, error) {
+// SpecOf extracts a generator spec from a slide's fields, returning the key
+// it came from for error messages. Exported so internal/contract can
+// validate a chart/diagram block's spec/data paths with the exact same
+// parsing Apply uses, instead of a second copy that could drift from it.
+func SpecOf(s *deck.Slide) (*Spec, string, error) {
 	for _, key := range SpecKeys {
 		raw, ok := s.Fields[key]
 		if !ok {

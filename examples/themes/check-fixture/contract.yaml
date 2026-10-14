@@ -1,0 +1,7 @@
+# check-fixture's one layout ("broken") exists to trip every `check` rule at
+# render time, not to exercise `validate` — so its own contract just has to
+# let the fixture deck through, not be interesting.
+layouts:
+  broken:
+    required: [items]
+    allowed: []

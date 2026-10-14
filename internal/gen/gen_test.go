@@ -148,6 +148,16 @@ func TestResolveFailureModes(t *testing.T) {
 		{"no spec file named", gen.Spec{Generator: "python"}, nil, true, "no spec file"},
 		{"missing spec file", gen.Spec{Generator: "python", Spec: "absent.py"}, nil, true, "no such file"},
 		{"missing data file", gen.Spec{Generator: "python", Spec: "chart.py", Data: "absent.csv"}, nil, true, "no such file"},
+		{
+			"spec path escapes the deck root",
+			gen.Spec{Generator: "python", Spec: "../../etc/passwd"},
+			nil, true, "escapes",
+		},
+		{
+			"data path escapes the deck root",
+			gen.Spec{Generator: "python", Spec: "chart.py", Data: "../../etc/passwd"},
+			nil, true, "escapes",
+		},
 		{"tool not installed", gen.Spec{Generator: "python", Spec: "chart.py"}, nil, false, "needs \"python3\""},
 		{
 			"generator exits non-zero",
