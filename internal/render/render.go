@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -170,6 +171,21 @@ func copyDir(src, dst string) error {
 				return err
 			}
 			continue
+		}
+		// e.IsDir() uses Lstat semantics: a symlink pointing at a directory
+		// reports false here, same as a regular file. Left unhandled, it
+		// would fall through to copyFile, which opens it fine (os.Open
+		// follows symlinks) but then fails on the copy with a low-level
+		// "is a directory" error that names neither the symlink nor why. A
+		// symlink loop takes the same path — the loop-back entry's IsDir()
+		// is also false — so it fails immediately here rather than
+		// recursing unboundedly; there is no loop to guard against. Name the
+		// real problem instead of letting copyFile's error stand in for it.
+		if e.Type()&fs.ModeSymlink != 0 {
+			if target, err := os.Stat(from); err == nil && target.IsDir() {
+				return fmt.Errorf("%s is a symlink to a directory, which is not supported here; "+
+					"point the theme or deck asset at a real directory instead", from)
+			}
 		}
 		if err := copyFile(from, to); err != nil {
 			return err

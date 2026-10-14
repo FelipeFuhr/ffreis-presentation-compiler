@@ -21,6 +21,7 @@ import (
 	"hash/crc32"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -47,6 +48,13 @@ type Deck struct {
 }
 
 // Write serialises the deck to a .pptx at dst.
+//
+// The write is atomic: the archive is built in a temporary file beside dst
+// and only moved into place with os.Rename once it is complete. A failure
+// partway through — or at the final rename — removes the temporary file and
+// never touches dst, so a consumer never sees a truncated .pptx where a real
+// one used to be. The temp file is created in dst's own directory because
+// os.Rename fails across filesystems.
 func Write(dst string, d Deck) error {
 	if len(d.Slides) == 0 {
 		return fmt.Errorf("pptx: deck has no slides")
@@ -55,24 +63,37 @@ func Write(dst string, d Deck) error {
 		return fmt.Errorf("pptx: deck has no size")
 	}
 
-	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // destination is under the operator-supplied out dir
+	dir := filepath.Dir(dst)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(dst)+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("pptx: create %s: %w", dst, err)
+		return fmt.Errorf("pptx: create temp file in %s: %w", dir, err)
 	}
-	z := zip.NewWriter(f)
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
 
+	z := zip.NewWriter(tmp)
 	if err := writeParts(z, d); err != nil {
 		_ = z.Close()
-		_ = f.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := z.Close(); err != nil {
-		_ = f.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("pptx: close archive: %w", err)
 	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("pptx: close %s: %w", dst, err)
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("pptx: close %s: %w", tmpPath, err)
 	}
+
+	if err := os.Rename(tmpPath, dst); err != nil {
+		return fmt.Errorf("pptx: rename into place at %s: %w", dst, err)
+	}
+	committed = true
 	return nil
 }
 
