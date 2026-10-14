@@ -7,6 +7,7 @@ Thank you for your interest in contributing! This guide will help you get starte
 ### Prerequisites
 
 See [AGENTS.md](AGENTS.md) for:
+
 - Required tools and versions
 - Development environment setup
 - Build and test commands
@@ -33,15 +34,18 @@ make ci
    - `chore/` for maintenance
    - `docs/` for documentation
 
-2. **Make your changes** — follow the project's code style and conventions (enforced by lefthook)
+2. **Make your changes** — follow the project's code style and conventions
+   (enforced by lefthook)
 
 3. **Test locally** — before pushing:
+
    ```bash
    make lint
    make test
    ```
 
 4. **Submit a draft PR** — new PRs must start as drafts:
+
    ```bash
    git push -u origin <branch>
    gh pr create --draft
@@ -85,6 +89,7 @@ make coverage      # Generate coverage report
 ```
 
 Prefer:
+
 - Unit tests for individual functions
 - Integration tests for workflows
 - Clear test names that describe the scenario
@@ -109,7 +114,8 @@ Found a bug or have a feature request?
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the same license as the project.
+By contributing, you agree that your contributions will be licensed under the
+same license as the project.
 
 ---
 

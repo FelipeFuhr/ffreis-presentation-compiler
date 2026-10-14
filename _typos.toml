@@ -1,0 +1,12 @@
+# typos-cli config — see https://github.com/crate-ci/typos
+#
+# internal/engine/pptx/assets/theme1.xml is a verbatim OOXML theme part
+# (copied as-is into every generated .pptx) and must never be hand-edited —
+# see AGENTS.md "PPTX export". It triggers one false positive: `Beng` is the
+# ISO 15924 script code for Bengali (`<a:font script="Beng" .../>`), which
+# typos' dictionary matches to `Being`. Exclude the file rather than
+# allowlisting the word repo-wide, since nobody should be editing this file's
+# prose (there is none) and a repo-wide allowlist would hide a genuine
+# `Beng`/`Being` typo anywhere else in the codebase.
+[files]
+extend-exclude = ["internal/engine/pptx/assets/theme1.xml"]

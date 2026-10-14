@@ -1,10 +1,12 @@
 # ffreis-presentation-compiler
 
 <!-- ffreis-badges:start -->
-[![CI](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/FelipeFuhr/ffreis-badges/main/badges/ffreis-presentation-compiler/ci.json)](https://github.com/FelipeFuhr/ffreis-presentation-compiler/actions) [![License](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/FelipeFuhr/ffreis-badges/main/badges/ffreis-presentation-compiler/license.json)](https://github.com/FelipeFuhr/ffreis-presentation-compiler/blob/main/LICENSE)
+[![CI](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/FelipeFuhr/ffreis-badges/main/badges/ffreis-presentation-compiler/ci.json)](https://github.com/FelipeFuhr/ffreis-presentation-compiler/actions)
+[![License](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/FelipeFuhr/ffreis-badges/main/badges/ffreis-presentation-compiler/license.json)](https://github.com/FelipeFuhr/ffreis-presentation-compiler/blob/main/LICENSE)
 <!-- ffreis-badges:end -->
 
-Compiles declarative slide decks (YAML + Markdown + a brand theme) to HTML, PDF and PNG.
+Compiles declarative slide decks (YAML + Markdown + a brand theme) to HTML,
+PDF and PNG.
 
 A slide is front-matter plus prose, not a pile of coordinates:
 
