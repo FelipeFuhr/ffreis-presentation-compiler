@@ -8,7 +8,14 @@
 (() => {
   const TOL = __TOL_PX__;     // px; see Options.TolerancePx in check.go
   const MIN_FONT_PX = __MIN_FONT_PX__;
+  const OVERLAP_MIN_AREA_PX = __OVERLAP_MIN_AREA_PX__; // px^2; see Options.OverlapMinAreaPx
   const FONTS = __FONTS__;
+  // A slide with more leaf text blocks than this is pathological (almost
+  // certainly a generated diagram with one span per glyph, not authored
+  // content); the overlap rule skips such a slide rather than running an
+  // O(n^2) pairwise comparison that would hang the check instead of
+  // reporting on it.
+  const MAX_OVERLAP_LEAVES = 400;
   const findings = [];
   const add = (slide, rule, element, detail) =>
     findings.push({ slide, rule, element, detail });
@@ -67,6 +74,14 @@
       .map((n) => n.textContent.trim())
       .join(" ")
       .trim();
+
+  // Real intersecting area of two rects, in px^2. Zero when they merely
+  // touch or do not overlap, so a shared edge never reads as a collision.
+  const overlapArea = (a, b) => {
+    const w = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    const h = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+    return w > 0 && h > 0 ? w * h : 0;
+  };
 
   for (const slide of document.querySelectorAll("[data-slide]")) {
     const n = Number(slide.dataset.slide) || 0;
@@ -128,9 +143,50 @@
         }
       }
     }
+
+    // 7. Two text blocks that visually collide — the defect this guards
+    //    against is a diagram where a label lands on another label or on an
+    //    arrow. Ancestor/descendant pairs always intersect by construction
+    //    and are skipped via contains(). Absolutely/fixed-positioned chrome
+    //    (the slide badge, the phase pill) sits over the body box by
+    //    design, so the policy is structural rather than a class list:
+    //    compare only elements in normal flow (position static or
+    //    relative); data-overlap-ignore is the theme-declared escape hatch
+    //    for anything else that is meant to sit on top, the same pattern as
+    //    data-measure / data-slide. Only leaf text blocks are compared —
+    //    ownText, reused from above, is what keeps a container from being
+    //    blamed for its children — and a real area of overlap is required
+    //    so two inline siblings sharing a line do not fire on a touching
+    //    edge.
+    //
+    //    This is O(n^2) over one slide's text leaves. That is fine at slide
+    //    scale, so do not "optimise" it into something that skips a real
+    //    collision; MAX_OVERLAP_LEAVES exists so a pathological slide is
+    //    skipped outright instead of hanging the check.
+    const leaves = [...slide.querySelectorAll("*")].filter((el) => {
+      if (el.hasAttribute("data-overlap-ignore")) return false;
+      const style = getComputedStyle(el);
+      if (!isVisible(el, style)) return false;
+      if (style.position === "absolute" || style.position === "fixed") return false;
+      return ownText(el) !== "";
+    });
+
+    if (leaves.length <= MAX_OVERLAP_LEAVES) {
+      for (let i = 0; i < leaves.length; i++) {
+        for (let j = i + 1; j < leaves.length; j++) {
+          const a = leaves[i];
+          const b = leaves[j];
+          if (a.contains(b) || b.contains(a)) continue;
+          const area = overlapArea(a.getBoundingClientRect(), b.getBoundingClientRect());
+          if (area > OVERLAP_MIN_AREA_PX) {
+            add(n, "overlap", describe(a), `overlaps ${describe(b)} by ${Math.round(area)}px²`);
+          }
+        }
+      }
+    }
   }
 
-  // 7. A self-hosted face that fails to load silently substitutes, which is how
+  // 8. A self-hosted face that fails to load silently substitutes, which is how
   //    a deck stops looking like the brand without anyone noticing.
   //
   //    document.fonts.check() is the obvious API and the wrong one: it answers

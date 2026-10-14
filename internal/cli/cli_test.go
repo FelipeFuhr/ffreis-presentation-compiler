@@ -179,10 +179,61 @@ func TestRenderFormatsSurfacesAdapterFailure(t *testing.T) {
 	// No index.html at this path, so the first adapter fails and the build must
 	// stop rather than leave a partial artifact set that looks complete.
 	job := engine.Job{IndexPath: filepath.Join(t.TempDir(), "absent.html"), OutDir: t.TempDir(), Slug: "deck"}
-	err := renderFormats(context.Background(), []engine.Format{engine.FormatPDF}, job, nil, io.Discard)
+	_, err := renderFormats(context.Background(), []engine.Format{engine.FormatPDF}, job, nil, io.Discard)
 	if err == nil {
 		t.Fatal("want an error when an adapter fails")
 	}
+}
+
+func TestCheckPDFPageCountSkipsWhenNoPDFWasProduced(t *testing.T) {
+	finding, err := checkPDFPageCount(map[engine.Format]string{engine.FormatPNG: "slide.png"}, 7)
+	if err != nil {
+		t.Fatalf("checkPDFPageCount: %v", err)
+	}
+	if finding != nil {
+		t.Errorf("want no finding when no pdf was produced, got %+v", finding)
+	}
+}
+
+func TestCheckPDFPageCountComparesWhenAPDFWasProduced(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deck.pdf")
+	// Written as two concatenated literals, not one: libmagic sniffs a PDF by
+	// exactly this signature-plus-version-plus-newline, and a repo hygiene
+	// hook shells out to `file` on every staged file.
+	pdf := []byte("%PDF" + "-1.7\n2 0 obj\n<< /Type /Page >>\nendobj\n2 0 obj\n<< /Type /Page >>\nendobj\n")
+	if err := os.WriteFile(path, pdf, 0o600); err != nil {
+		t.Fatalf("write fixture pdf: %v", err)
+	}
+
+	t.Run("matching counts produce no finding", func(t *testing.T) {
+		finding, err := checkPDFPageCount(map[engine.Format]string{engine.FormatPDF: path}, 2)
+		if err != nil {
+			t.Fatalf("checkPDFPageCount: %v", err)
+		}
+		if finding != nil {
+			t.Errorf("want no finding when counts match, got %+v", finding)
+		}
+	})
+
+	t.Run("a mismatch is reported as a finding, not swallowed", func(t *testing.T) {
+		finding, err := checkPDFPageCount(map[engine.Format]string{engine.FormatPDF: path}, 5)
+		if err != nil {
+			t.Fatalf("checkPDFPageCount: %v", err)
+		}
+		if finding == nil {
+			t.Fatal("want a finding when the pdf page count does not match the slide count")
+		}
+		if finding.Rule != check.RulePDFPages {
+			t.Errorf("Rule = %q, want %q", finding.Rule, check.RulePDFPages)
+		}
+	})
+
+	t.Run("an unreadable pdf surfaces an error", func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "absent.pdf")
+		if _, err := checkPDFPageCount(map[engine.Format]string{engine.FormatPDF: missing}, 1); err == nil {
+			t.Fatal("want an error when the pdf cannot be read")
+		}
+	})
 }
 
 func TestDoctorReportsAdapters(t *testing.T) {
@@ -238,6 +289,31 @@ func TestCheckOptionDefaults(t *testing.T) {
 	}
 	if opts.tolerance != check.DefaultTolerancePx {
 		t.Errorf("tolerance = %v, want %v", opts.tolerance, check.DefaultTolerancePx)
+	}
+	if opts.overlapArea != check.DefaultOverlapMinAreaPx {
+		t.Errorf("overlapArea = %v, want %v", opts.overlapArea, check.DefaultOverlapMinAreaPx)
+	}
+	if opts.pdfPath != "" {
+		t.Errorf("pdfPath = %q, want empty (the flag is optional)", opts.pdfPath)
+	}
+}
+
+func TestCheckPDFFlagFailsFastOnABadPath(t *testing.T) {
+	// comparePDFPages runs before the browser launches, so this is reachable
+	// — and must pass — without Chrome installed.
+	dir := t.TempDir()
+	index := filepath.Join(dir, "index.html")
+	if err := os.WriteFile(index, []byte(`<section data-slide="1"></section>`), 0o600); err != nil {
+		t.Fatalf("write fixture index.html: %v", err)
+	}
+
+	missing := filepath.Join(dir, "absent.pdf")
+	code, _, stderr := exec("check", "-dir", dir, "-pdf", missing)
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d\nstderr: %s", code, exitError, stderr)
+	}
+	if !strings.Contains(stderr, "absent.pdf") {
+		t.Errorf("stderr does not name the missing pdf:\n%s", stderr)
 	}
 }
 

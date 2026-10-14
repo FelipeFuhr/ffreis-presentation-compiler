@@ -167,12 +167,20 @@ SMOKE_OUT   ?= .bin/smoke
 install: ## Install the CLI into GOBIN
 	@go install ./cmd/$(BINARY)
 
+# A raw "html,pdf" cannot sit directly inside $(or ...) below: GNU Make's
+# function-argument splitter treats a top-level comma in the call's own text
+# as a separator, so $(or $(FORMATS),html,pdf) silently resolved to just
+# "html" whenever FORMATS was unset — the comma inside an already-expanded
+# variable's value is not re-split, so routing it through DEFAULT_FORMATS
+# fixes it.
+DEFAULT_FORMATS := html,pdf
+
 build: ## Render the example deck (override DECK=/path THEMES=/path OUT=/path)
 	@go run ./cmd/$(BINARY) build \
 		-deck-root "$(or $(DECK),$(EXAMPLE_DECK))" \
 		-theme-root "$(or $(THEMES),$(EXAMPLE_THEMES))" \
 		-out "$(or $(OUT),dist)" \
-		-formats "$(or $(FORMATS),html,pdf)"
+		-formats "$(or $(FORMATS),$(DEFAULT_FORMATS))"
 
 doctor: ## Report which render adapters are available on this machine
 	@go run ./cmd/$(BINARY) doctor
@@ -207,17 +215,19 @@ check-selftest: ## Prove the checker is not vacuous: the broken fixture must fai
 	@rm -rf "$(CHECK_OUT)-fixture" && mkdir -p "$(CHECK_OUT)-fixture"
 	@go run ./cmd/$(BINARY) build -deck-root examples/check-fixture \
 		-theme-root "$(EXAMPLE_THEMES)" -out "$(CHECK_OUT)-fixture" -formats html >/dev/null
-	@out=$$(go run ./cmd/$(BINARY) check -dir "$(CHECK_OUT)-fixture" \
-		-theme-root "$(EXAMPLE_THEMES)" -theme check-fixture 2>&1 || true); \
+	@fakepdf="$(CHECK_OUT)-fixture/mismatch.pdf"; \
+	printf '%%PDF-1.4\n1 0 obj\n<< /Type /Page >>\nendobj\n' > "$$fakepdf"; \
+	out=$$(go run ./cmd/$(BINARY) check -dir "$(CHECK_OUT)-fixture" \
+		-theme-root "$(EXAMPLE_THEMES)" -theme check-fixture -pdf "$$fakepdf" 2>&1 || true); \
 	missing=""; \
-	for rule in overflow out-of-bounds tiny-type contrast missing-asset font-fallback; do \
+	for rule in overflow out-of-bounds tiny-type contrast missing-asset font-fallback overlap pdf-pages; do \
 		echo "$$out" | grep -q "$$rule" || missing="$$missing $$rule"; \
 	done; \
 	if [ -n "$$missing" ]; then \
 		echo "check-selftest: the fixture did not trigger:$$missing" >&2; \
 		echo "$$out" >&2; exit 1; \
 	fi; \
-	echo "check-selftest: ok — all 6 rules fired on the broken fixture"
+	echo "check-selftest: ok — all 8 rules fired on the broken fixture"
 
 export-selftest: ## Prove the PPTX actually opens: round-trip it through LibreOffice
 	@command -v soffice >/dev/null 2>&1 || { echo "export-selftest: soffice not installed — skipping" >&2; exit 0; }

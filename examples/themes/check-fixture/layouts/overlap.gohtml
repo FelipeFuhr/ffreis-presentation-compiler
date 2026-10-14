@@ -1,0 +1,6 @@
+{{- /* overlap: two normal-flow text blocks nudged onto the same region with a
+       transform, so they visually collide without going through
+       position:absolute — triggers `overlap`, and proves the rule still
+       catches a collision that is not the badge/phase-pill kind of chrome. */ -}}
+<p class="overlap-a">First label sits here.</p>
+<p class="overlap-b">Second label lands on top of it.</p>

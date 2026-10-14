@@ -51,12 +51,13 @@ func usage(w io.Writer, program string) {
 
 usage:
   %s build  -deck-root <dir> -theme-root <dir> [-out dist] [-formats html,pdf]
-  %s check  [-dir dist] [-theme-root <dir> -theme <name>]
+  %s check  [-dir dist] [-theme-root <dir> -theme <name>] [-pdf <file>]
   %s doctor
 
 commands:
   build    render a deck directory into the output directory
-  check    measure a rendered deck: overflow, out-of-bounds, contrast, fonts
+  check    measure a rendered deck: overflow, out-of-bounds, tiny-type,
+           contrast, missing-asset, font-fallback, overlap, pdf-pages
   doctor   report which render adapters are available on this machine
 `, program, program, program, program)
 }
