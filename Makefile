@@ -351,7 +351,7 @@ GOLDEN_BASELINE ?= examples/golden
 GOLDEN_RENDER   ?= .bin/golden-render
 GOLDEN_DIFF     ?= .bin/golden
 
-golden: ## Compare the rendered example deck's PNGs against the approved baseline (perceptual diff)
+golden: ## Compare the rendered example deck's PNG files against the approved baseline (perceptual diff)
 	@rm -rf "$(GOLDEN_RENDER)" && mkdir -p "$(GOLDEN_RENDER)"
 	@go run ./cmd/$(BINARY) build -deck-root "$(EXAMPLE_DECK)" \
 		-theme-root "$(EXAMPLE_THEMES)" -out "$(GOLDEN_RENDER)" -formats png >/dev/null

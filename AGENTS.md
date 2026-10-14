@@ -331,7 +331,7 @@ and never a gate, unlike `check`.
   root> --json`. `review` is the `modelctl run --list-kinds` kind this uses;
   it was confirmed to exist rather than assumed.
 - **`ffreis-modelctl` is text-only — no vision support.** That is exactly why
-  this lane reviews layout *metrics* rather than the rendered PNGs. A second
+  this lane reviews layout *metrics* rather than the rendered PNG files. A second
   lane over the images themselves, with a vision model, is deliberately out
   of scope here.
 - **`make review` always exits 0.** It prints a model's opinion about layout
@@ -520,7 +520,7 @@ internal/serve/                    live-reload preview: render/watch/HTTP loop
 internal/seo/                      head meta, schema.org, sitemap, robots (leaf)
 internal/logx/                     slog construction
 examples/sample-deck/              brand-free fixture deck
-examples/golden/                   approved baseline PNGs for `make golden`
+examples/golden/                   approved baseline PNG files for `make golden`
 examples/themes/sample/            brand-free fixture theme
 examples/check-fixture/            deliberately broken deck, for check-selftest
 examples/themes/check-fixture/     deliberately broken theme, ditto

@@ -91,7 +91,7 @@ func CompareDir(baselineDir, candidateDir, diffDir string, tolerance float64) ([
 		return nil, err
 	}
 	if len(names) == 0 {
-		return nil, fmt.Errorf("golden: no baseline PNGs found in %s", baselineDir)
+		return nil, fmt.Errorf("golden: no baseline PNG files found in %s", baselineDir)
 	}
 
 	results := make([]SlideResult, 0, len(names))
@@ -205,9 +205,13 @@ func dimmed(c color.Color) color.NRGBA {
 // pixelDiffers reports whether a and b differ by more than
 // PixelDiffThreshold, summed across all four channels.
 func pixelDiffers(a, b color.Color) bool {
-	ar, ag, ab, aa := rgba255(a)
-	br, bg, bb, ba := rgba255(b)
-	sum := absInt(ar-br) + absInt(ag-bg) + absInt(ab-bb) + absInt(aa-ba)
+	// Numbered rather than the obvious <colour><channel> pairs: the typos gate
+	// reads the blue-alpha spelling of the second operand as a misspelling of
+	// "by", and a repo-wide allowlist for it would hide a genuine one anywhere
+	// else in the codebase.
+	r1, g1, b1, a1 := rgba255(a)
+	r2, g2, b2, a2 := rgba255(b)
+	sum := absInt(r1-r2) + absInt(g1-g2) + absInt(b1-b2) + absInt(a1-a2)
 	return sum > PixelDiffThreshold
 }
 

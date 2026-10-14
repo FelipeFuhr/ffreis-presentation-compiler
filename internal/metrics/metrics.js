@@ -5,7 +5,7 @@
 // ceiling, and this is a different job entirely — reporting numbers for a
 // model (or a human) to read, not pass/fail findings. ffreis-modelctl is
 // text-only, which is exactly why `make review` hands it these metrics
-// rather than the rendered PNGs: a vision-model lane over the images is a
+// rather than the rendered PNG files: a vision-model lane over the images is a
 // different, out-of-scope lane.
 //
 // Returns [{slide, layout, boxes, textLength, bulletCount, fontSizesPx,
@@ -82,7 +82,12 @@
         colours.add(style.backgroundColor);
       }
     }
-    return [...colours].sort();
+    // Explicit comparator: these are rgb() strings, so the default
+    // lexicographic sort is already correct — but Array.sort's default
+    // coerces to string, which is a real bug for numeric input, and scanners
+    // cannot tell the two cases apart. Stating it costs a line and removes
+    // the ambiguity for the next reader too.
+    return [...colours].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   };
 
   // Density: text area over slide area. Leaves can share a touching edge, so

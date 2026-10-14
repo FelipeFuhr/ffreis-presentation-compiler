@@ -13,6 +13,7 @@ package metrics
 
 import (
 	"context"
+	// Blank: imported for the side effect that makes //go:embed below legal.
 	_ "embed"
 	"fmt"
 )

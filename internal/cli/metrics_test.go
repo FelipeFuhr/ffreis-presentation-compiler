@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -79,5 +80,21 @@ func TestWriteMetricsReportsAnUnwritablePath(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "metrics:") {
 		t.Errorf("stderr does not report the failure:\n%s", stderr.String())
+	}
+}
+
+func TestWriteMetricsReportsAnUnwritableDestination(t *testing.T) {
+	// A metrics run that silently failed to write would leave `make review`
+	// critiquing a stale file from a previous build.
+	var stdout, stderr bytes.Buffer
+	unwritable := filepath.Join(t.TempDir(), "absent-dir", "metrics.json")
+
+	code := writeMetrics(unwritable, []byte(`[{"slide":1}]`), &stdout, &stderr)
+
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr.String(), "metrics:") {
+		t.Errorf("stderr does not name the failure:\n%s", stderr.String())
 	}
 }

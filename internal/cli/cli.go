@@ -71,7 +71,7 @@ commands:
   validate  check a deck against its theme's field contract before rendering
   check     measure a rendered deck: overflow, out-of-bounds, tiny-type,
             contrast, missing-asset, font-fallback, overlap, pdf-pages
-  golden    compare freshly rendered slide PNGs against an approved baseline
+  golden    compare freshly rendered slide PNG files against an approved baseline
   metrics   extract per-slide layout metrics (box geometry, density, palette…)
   serve     render, serve over loopback HTTP, and reload on source changes
   doctor    report which render adapters are available on this machine
