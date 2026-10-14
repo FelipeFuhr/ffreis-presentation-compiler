@@ -36,6 +36,8 @@ func run(program string, args []string, stdout, stderr io.Writer) int {
 		return runValidate(args[1:], stdout, stderr)
 	case "check":
 		return runCheck(args[1:], stdout, stderr)
+	case "serve":
+		return runServe(args[1:], stdout, stderr)
 	case "doctor":
 		return runDoctor(args[1:], stdout, stderr)
 	case "-h", "--help", "help":
@@ -55,12 +57,14 @@ usage:
   %s build     -deck-root <dir> -theme-root <dir> [-out dist] [-formats html,pdf]
   %s validate  -deck-root <dir> -theme-root <dir>
   %s check     [-dir dist] [-theme-root <dir> -theme <name>]
+  %s serve     -deck-root <dir> -theme-root <dir> [-addr 127.0.0.1:8080]
   %s doctor
 
 commands:
   build     render a deck directory into the output directory
   validate  check a deck against its theme's field contract before rendering
   check     measure a rendered deck: overflow, out-of-bounds, contrast, fonts
+  serve     render, serve over loopback HTTP, and reload on source changes
   doctor    report which render adapters are available on this machine
-`, program, program, program, program, program)
+`, program, program, program, program, program, program)
 }
