@@ -23,8 +23,9 @@ import (
 type Format string
 
 const (
-	FormatPDF Format = "pdf"
-	FormatPNG Format = "png"
+	FormatPDF  Format = "pdf"
+	FormatPNG  Format = "png"
+	FormatPPTX Format = "pptx"
 )
 
 // Job describes one render request.
@@ -79,7 +80,11 @@ func ParseFormats(csv string) ([]Format, error) {
 	if csv == "" {
 		return nil, nil
 	}
-	known := map[string]Format{string(FormatPDF): FormatPDF, string(FormatPNG): FormatPNG}
+	known := map[string]Format{
+		string(FormatPDF):  FormatPDF,
+		string(FormatPNG):  FormatPNG,
+		string(FormatPPTX): FormatPPTX,
+	}
 	var out []Format
 	for _, field := range strings.Split(csv, ",") {
 		name := strings.TrimSpace(field)
@@ -93,7 +98,7 @@ func ParseFormats(csv string) ([]Format, error) {
 		}
 		f, ok := known[name]
 		if !ok {
-			return nil, fmt.Errorf("unknown format %q: want html, pdf or png", name)
+			return nil, fmt.Errorf("unknown format %q: want html, pdf, png or pptx", name)
 		}
 		out = append(out, f)
 	}

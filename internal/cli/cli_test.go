@@ -155,7 +155,7 @@ func TestBuildDefaultsTheSlugToTheDeckDirectoryName(t *testing.T) {
 }
 
 func TestRendererForKnownAndUnimplementedFormats(t *testing.T) {
-	r, err := rendererFor(engine.FormatPDF)
+	r, err := rendererFor(engine.FormatPDF, nil)
 	if err != nil {
 		t.Fatalf("rendererFor(pdf): %v", err)
 	}
@@ -163,18 +163,25 @@ func TestRendererForKnownAndUnimplementedFormats(t *testing.T) {
 		t.Errorf("got a %q renderer, want pdf", r.Format())
 	}
 
-	// PNG is a declared format with no adapter yet; it must say so rather than
-	// silently producing nothing.
-	if _, err := rendererFor(engine.FormatPNG); err == nil {
-		t.Fatal("want an error for a format with no adapter")
+	if _, err := rendererFor(engine.FormatPNG, nil); err != nil {
+		t.Fatalf("rendererFor(png): %v", err)
+	}
+	pptxRenderer, err := rendererFor(engine.FormatPPTX, map[int]string{1: "note"})
+	if err != nil {
+		t.Fatalf("rendererFor(pptx): %v", err)
+	}
+	if pptxRenderer.Format() != engine.FormatPPTX {
+		t.Errorf("got a %q renderer, want pptx", pptxRenderer.Format())
 	}
 }
 
-func TestRenderFormatsStopsAtTheFirstFailure(t *testing.T) {
-	job := engine.Job{OutDir: t.TempDir(), Slug: "deck"}
-	err := renderFormats(context.Background(), []engine.Format{engine.FormatPNG}, job, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "no adapter") {
-		t.Fatalf("want the adapter error surfaced, got %v", err)
+func TestRenderFormatsSurfacesAdapterFailure(t *testing.T) {
+	// No index.html at this path, so the first adapter fails and the build must
+	// stop rather than leave a partial artifact set that looks complete.
+	job := engine.Job{IndexPath: filepath.Join(t.TempDir(), "absent.html"), OutDir: t.TempDir(), Slug: "deck"}
+	err := renderFormats(context.Background(), []engine.Format{engine.FormatPDF}, job, nil, io.Discard)
+	if err == nil {
+		t.Fatal("want an error when an adapter fails")
 	}
 }
 
