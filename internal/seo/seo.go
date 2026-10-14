@@ -28,13 +28,18 @@ import (
 
 // Defaults. RobotsPrivate is the default policy for the reason above.
 const (
-	RobotsPrivate   = "noindex, nofollow"
-	RobotsPublic    = "index, follow, max-image-preview:large"
-	defaultCard     = "summary_large_image"
-	defaultOGType   = "article"
-	sitemapFile     = "sitemap.xml"
-	robotsFile      = "robots.txt"
-	sitemapXMLNS    = "http://www.sitemaps.org/schemas/sitemap/0.9"
+	RobotsPrivate = "noindex, nofollow"
+	RobotsPublic  = "index, follow, max-image-preview:large"
+	defaultCard   = "summary_large_image"
+	defaultOGType = "article"
+	sitemapFile   = "sitemap.xml"
+	robotsFile    = "robots.txt"
+	// An XML namespace name, not an address: nothing dereferences it, and the
+	// sitemaps protocol fixes it to this exact string — an https spelling is a
+	// different namespace and makes the document invalid. The scanners read it
+	// as insecure HTTP regardless, so the suppression is here with its reason
+	// rather than on the three call sites.
+	sitemapXMLNS    = "http://www.sitemaps.org/schemas/sitemap/0.9" // NOSONAR go:S5332
 	schemaContext   = "https://schema.org"
 	schemaType      = "PresentationDigitalDocument"
 	schemaOrgType   = "Organization"

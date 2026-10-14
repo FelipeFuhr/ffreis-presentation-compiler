@@ -5,7 +5,6 @@ import (
 	"encoding/xml"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -104,7 +103,7 @@ func TestHeadNeverEmitsAnEmptyTag(t *testing.T) {
 	// and a crawler reads it as an assertion that the field is blank.
 	head := string(seo.Head(seo.Document{Title: "T", Lang: "en"}, seo.Meta{BaseURL: "https://example.com"}))
 
-	if m := regexp.MustCompile(`content=""`).FindString(head); m != "" {
+	if strings.Contains(head, `content=""`) {
 		t.Errorf("head contains an empty content attribute:\n%s", head)
 	}
 }

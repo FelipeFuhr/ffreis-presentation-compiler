@@ -13,6 +13,18 @@ type Finding struct {
 	Detail string `json:"detail"`
 }
 
+// The deck.yaml key paths a finding can name. Spelled once so a renamed key
+// cannot be renamed in only some of the messages that point at it.
+const (
+	fieldTitle        = "title"
+	fieldRobots       = "seo.robots"
+	fieldDescription  = "seo.description"
+	fieldBaseURL      = "seo.base_url"
+	fieldOrganization = "seo.organization"
+	fieldImage        = "seo.image"
+	fieldImageAlt     = "seo.image_alt"
+)
+
 // Validate reports what would ship wrong.
 //
 // Only a published deck is held to the full contract. A private deck has no
@@ -29,14 +41,14 @@ func Validate(d Document, m Meta) []Finding {
 
 	title := strings.TrimSpace(d.Title)
 	if title == "" {
-		findings = append(findings, Finding{"title", "the deck has no title; it becomes the <title>, og:title and schema name"})
+		findings = append(findings, Finding{fieldTitle, "the deck has no title; it becomes the <title>, og:title and schema name"})
 	} else if n := utf8.RuneCountInString(title); n > MaxTitleChars {
-		findings = append(findings, Finding{"title",
+		findings = append(findings, Finding{fieldTitle,
 			fmt.Sprintf("%d characters; search results truncate past %d", n, MaxTitleChars)})
 	}
 
 	if n := utf8.RuneCountInString(m.robots()); n > MaxRobotsChars {
-		findings = append(findings, Finding{"seo.robots",
+		findings = append(findings, Finding{fieldRobots,
 			fmt.Sprintf("%d characters; this is a directive list, not prose", n)})
 	}
 
@@ -54,20 +66,20 @@ func publishedFindings(d Document, m Meta) []Finding {
 	findings = append(findings, descriptionFindings(d, m)...)
 
 	if !strings.HasPrefix(m.BaseURL, "https://") {
-		findings = append(findings, Finding{"seo.base_url",
+		findings = append(findings, Finding{fieldBaseURL,
 			fmt.Sprintf("%q is not an absolute https URL; a relative canonical, og:url or sitemap entry is ignored", m.BaseURL)})
 	}
 	if strings.TrimSpace(m.Organization) == "" {
-		findings = append(findings, Finding{"seo.organization",
+		findings = append(findings, Finding{fieldOrganization,
 			"a published deck has no author, og:site_name or schema publisher without it"})
 	}
 	// An unfurler shows the image or it shows nothing; there is no fallback to
 	// pick from, so an absent one is a finding rather than a silent degrade.
 	if m.imageURL() == "" {
-		findings = append(findings, Finding{"seo.image",
+		findings = append(findings, Finding{fieldImage,
 			"no social image; a shared link unfurls as text with no preview"})
 	} else if strings.TrimSpace(m.ImageAlt) == "" {
-		findings = append(findings, Finding{"seo.image_alt",
+		findings = append(findings, Finding{fieldImageAlt,
 			"a social image with no alt text is unreadable to anyone using a screen reader"})
 	}
 	return findings
@@ -76,17 +88,17 @@ func publishedFindings(d Document, m Meta) []Finding {
 func descriptionFindings(d Document, m Meta) []Finding {
 	desc := m.description(d)
 	if desc == "" {
-		return []Finding{{"seo.description",
+		return []Finding{{fieldDescription,
 			"no description and no deck subtitle to fall back on; search results and link previews would show an arbitrary excerpt"}}
 	}
 
 	n := utf8.RuneCountInString(desc)
 	switch {
 	case n < MinDescChars:
-		return []Finding{{"seo.description",
+		return []Finding{{fieldDescription,
 			fmt.Sprintf("%d characters; under %d reads as a fragment in a search result", n, MinDescChars)}}
 	case n > MaxDescChars:
-		return []Finding{{"seo.description",
+		return []Finding{{fieldDescription,
 			fmt.Sprintf("%d characters; truncated past %d", n, MaxDescChars)}}
 	}
 	return nil
