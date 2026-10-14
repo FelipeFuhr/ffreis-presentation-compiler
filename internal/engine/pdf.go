@@ -61,6 +61,8 @@ func (r *PDFRenderer) Render(ctx context.Context, job Job) (string, error) {
 		run = ExecRunner
 	}
 
+	target := FileURL(job.IndexPath)
+
 	// --no-pdf-header-footer drops Chrome's default date/URL furniture;
 	// --no-sandbox and --disable-dev-shm-usage are what make this work inside
 	// CI containers and act, where user namespaces and /dev/shm are limited.
@@ -71,7 +73,7 @@ func (r *PDFRenderer) Render(ctx context.Context, job Job) (string, error) {
 		"--disable-dev-shm-usage",
 		"--no-pdf-header-footer",
 		"--print-to-pdf=" + out,
-		"file://" + job.IndexPath,
+		target,
 	}
 	if err := run(ctx, r.Tool(), args...); err != nil {
 		return "", fmt.Errorf("pdf: %w", err)

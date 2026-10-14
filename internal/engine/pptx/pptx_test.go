@@ -193,3 +193,77 @@ func TestWriteReportsAnUnwritableDestination(t *testing.T) {
 		t.Fatal("want an error when the destination cannot be created")
 	}
 }
+
+// TestWriteLeavesNoTempFileOnSuccess guards the mechanism of the atomic-write
+// fix itself: the archive is built in a temp file beside dst and renamed into
+// place, so a successful Write must leave exactly the destination file behind
+// — no leftover ".tmp-*" sibling.
+func TestWriteLeavesNoTempFileOnSuccess(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "deck.pptx")
+	deck := pptx.Deck{WidthIn: 10, HeightIn: 7.5, Slides: []pptx.Slide{{PNG: onePixelPNG}}}
+
+	if err := pptx.Write(dst, deck); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Fatalf("destination was not written: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "deck.pptx" {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("output dir contains %v, want only deck.pptx", names)
+	}
+}
+
+// TestWriteLeavesNoFileOnFailureAfterTheArchiveIsBuilt forces a failure at the
+// final commit step — the os.Rename into place — by making the destination
+// an existing directory rather than a file: POSIX rename(2) refuses to
+// replace a directory with a non-directory (EISDIR). writeParts itself can't
+// be made to fail from outside the package without an injectable writer, and
+// adding one purely for this test would be a seam the production code has no
+// other use for. Forcing the failure at the rename step instead exercises the
+// exact guarantee the fix adds: even a late failure, after the whole archive
+// has been built successfully in the temp file, must not leave a truncated
+// (or any) artifact at the destination, and must not leave the temp file
+// behind either.
+func TestWriteLeavesNoFileOnFailureAfterTheArchiveIsBuilt(t *testing.T) {
+	dir := t.TempDir()
+	dst := filepath.Join(dir, "deck.pptx")
+	if err := os.Mkdir(dst, 0o750); err != nil {
+		t.Fatalf("pre-create destination as a directory: %v", err)
+	}
+
+	deck := pptx.Deck{WidthIn: 10, HeightIn: 7.5, Slides: []pptx.Slide{{PNG: onePixelPNG}}}
+	err := pptx.Write(dst, deck)
+	if err == nil {
+		t.Fatal("want an error when the destination cannot be replaced")
+	}
+
+	info, statErr := os.Stat(dst)
+	if statErr != nil {
+		t.Fatalf("destination vanished entirely: %v", statErr)
+	}
+	if !info.IsDir() {
+		t.Error("destination was replaced by a (presumably truncated) file instead of being left untouched")
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) != 1 {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("output dir contains %v, want only the untouched deck.pptx directory (no leftover temp file)", names)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/check"
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine/chrome"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/render"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/theme"
@@ -63,7 +64,9 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		runOpts.Fonts = th.Fonts
 	}
 
-	findings, err := check.Run(context.Background(), chrome.New(), "file://"+index, runOpts)
+	target := engine.FileURL(index)
+
+	findings, err := check.Run(context.Background(), chrome.New(), target, runOpts)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "check: %v\n", err)
 		return exitError

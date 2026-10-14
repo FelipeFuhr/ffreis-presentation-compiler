@@ -296,6 +296,21 @@ func TestExportAdapterFailureModes(t *testing.T) {
 		}
 	})
 
+	t.Run("pptx capture fails", func(t *testing.T) {
+		// The PPTX adapter has its own capture call; without this the error
+		// path is only covered for PNG and a regression here would ship a
+		// deck built from zero slides.
+		stubLookPath(t, true)
+		r := &engine.PPTXRenderer{Client: &fakeCapturer{err: errors.New("chrome exploded")}}
+		_, err := r.Render(context.Background(), newJob(t))
+		if err == nil || !strings.Contains(err.Error(), "chrome exploded") {
+			t.Fatalf("want the capture error surfaced, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "pptx") {
+			t.Errorf("error should name the adapter, got %v", err)
+		}
+	})
+
 	t.Run("missing index.html", func(t *testing.T) {
 		stubLookPath(t, true)
 		job := newJob(t)
