@@ -1,0 +1,40 @@
+# scan-fix(lefthook:hygiene-binary-files): the base command's allow-list
+# (text/*|application/json|application/xml|application/x-sh|inode/x-empty)
+# has no entry for `application/javascript` — the mime type `file`'s libmagic
+# database reports for a plain, plain-text .js file. internal/check/probe.js
+# (committed, not generated) trips this on every touch; it is source code,
+# not a binary artefact, so the fix is to extend the allow-list, not bypass
+# the hook.
+#
+# This MUST live in lefthook-local.yml, not lefthook.yml: per lefthook's own
+# merge order (`lefthook.yml -> remotes -> lefthook-local.yml`), a same-named
+# command re-declared in the root lefthook.yml is silently overwritten by the
+# remote's version (verified via `lefthook dump`) -- only lefthook-local.yml,
+# merged last, actually wins. See ffreis-opendeck-config/lefthook-local.yml
+# for the same finding.
+#
+# Committed (not the usual personal/gitignored use of this file) because both
+# local commits and the CI Lefthook job need the same allow-list, not just
+# this developer's machine.
+#
+# TODO(upstream): backport `application/javascript` to the allow-list in
+# ffreis-platform-standards's lefthook/base.yml so every consumer with a .js
+# asset gets this for free instead of needing this override.
+pre-commit:
+  commands:
+    hygiene-binary-files:
+      run: |
+        set -eu
+        tmpfiles=$(mktemp)
+        trap 'rm -f "$tmpfiles"' EXIT
+        git diff --cached --name-only -z | tr '\0' '\n' > "$tmpfiles"
+        [ -s "$tmpfiles" ] || exit 0
+        while IFS= read -r file; do
+          [ -n "$file" ] || continue
+          [ -f "$file" ] || continue
+          mime=$(file --mime-type -b "$file")
+          case "$mime" in
+            text/*|application/json|application/xml|application/x-sh|application/javascript|inode/x-empty) ;;
+            *) echo "binary file staged: $file ($mime)" >&2; exit 1 ;;
+          esac
+        done < "$tmpfiles"
