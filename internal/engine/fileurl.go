@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"fmt"
 	"net/url"
 	"path/filepath"
 )
@@ -19,10 +18,22 @@ import (
 //
 // path is absolutized first: a relative file:// URL resolves against
 // nothing, which would trade this bug for a more confusing one.
-func FileURL(path string) (string, error) {
+//
+// This deliberately returns no error. filepath.Abs fails only when
+// os.Getwd() does — i.e. the process's working directory has been removed
+// from under it — and every caller has already stat'd this same path, so
+// that condition surfaces there first and with a better message. An error
+// return here bought four call sites an `if err != nil` branch that no
+// caller could reach.
+func FileURL(path string) string {
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return "", fmt.Errorf("file URL for %s: %w", path, err)
+		// The working directory is gone, so a relative path cannot be
+		// resolved. It must still be made root-relative: url.URL renders a
+		// Path with no leading separator as "file://relative/index.html",
+		// which parses back with Host="relative" — a silently wrong URL
+		// rather than an obviously wrong one.
+		abs = "/" + filepath.ToSlash(path)
 	}
-	return (&url.URL{Scheme: "file", Path: abs}).String(), nil
+	return (&url.URL{Scheme: "file", Path: abs}).String()
 }

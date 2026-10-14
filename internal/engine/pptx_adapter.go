@@ -67,10 +67,7 @@ func (r *PPTXRenderer) Render(ctx context.Context, job Job) (string, error) {
 		scale = DefaultPNGScale
 	}
 
-	target, err := FileURL(job.IndexPath)
-	if err != nil {
-		return "", fmt.Errorf("pptx: %w", err)
-	}
+	target := FileURL(job.IndexPath)
 	shots, err := client.CaptureAll(ctx, target, SlideSelector, scale)
 	if err != nil {
 		return "", fmt.Errorf("pptx: %w", err)

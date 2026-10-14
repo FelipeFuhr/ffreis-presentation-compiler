@@ -30,10 +30,7 @@ func TestFileURLRoundTrips(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			abs := filepath.Join(dir, tc.file)
 
-			got, err := engine.FileURL(abs)
-			if err != nil {
-				t.Fatalf("FileURL(%q): %v", abs, err)
-			}
+			got := engine.FileURL(abs)
 
 			parsed, err := url.Parse(got)
 			if err != nil {
@@ -49,20 +46,17 @@ func TestFileURLRoundTrips(t *testing.T) {
 	}
 }
 
-// TestFileURLWrapsAnAbsFailure forces filepath.Abs's only failure mode —
-// os.Getwd() erroring — by chdir'ing into an empty directory and removing it
-// out from under the process, then calling FileURL with a relative path.
+// TestFileURLFallsBackWhenTheWorkingDirectoryIsGone forces filepath.Abs's
+// only failure mode — os.Getwd() erroring — by chdir'ing into an empty
+// directory and removing it out from under the process, then calling FileURL
+// with a relative path.
 //
-// This is exercised directly against FileURL rather than through any of its
-// callers (the PDF/PNG/PPTX adapters, the check subcommand) because every one
-// of them calls os.Stat or filepath.Abs on the same path *before* reaching
-// FileURL; with a dead working directory that earlier call fails for the
-// identical reason first, so the caller's own FileURL-error branch can never
-// be reached from outside the package. Verified empirically, not assumed:
-// with cwd removed, `os.Stat("x")` itself already returns
-// `stat x: no such file or directory` before FileURL's internal
-// `filepath.Abs` is ever reached.
-func TestFileURLWrapsAnAbsFailure(t *testing.T) {
+// FileURL deliberately has no error return: every caller stats the same path
+// first, so a dead working directory surfaces there with a better message,
+// and an error here only bought four callers an unreachable branch. This
+// locks in the fallback instead — the path is used as given rather than the
+// function panicking or emitting a "file://" URL with an empty path.
+func TestFileURLFallsBackWhenTheWorkingDirectoryIsGone(t *testing.T) {
 	orig, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -77,8 +71,19 @@ func TestFileURLWrapsAnAbsFailure(t *testing.T) {
 		t.Fatalf("remove the working directory out from under the process: %v", err)
 	}
 
-	if _, err := engine.FileURL("relative/index.html"); err == nil {
-		t.Fatal("want an error when the working directory no longer exists")
+	got := engine.FileURL("relative/index.html")
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("url.Parse(%q): %v", got, err)
+	}
+	// Root-relative, not bare: url.URL renders a Path with no leading
+	// separator as "file://relative/index.html", which parses back with
+	// Host="relative" and Path="/index.html" — silently wrong. Guard that.
+	if parsed.Host != "" {
+		t.Errorf("FileURL(%q) produced a URL with Host=%q; the path was misparsed as a host", got, parsed.Host)
+	}
+	if parsed.Path != "/relative/index.html" {
+		t.Errorf("FileURL fell back to %q, want the path made root-relative", parsed.Path)
 	}
 }
 
@@ -92,10 +97,7 @@ func TestFileURLAbsolutizesARelativePath(t *testing.T) {
 		t.Fatalf("filepath.Abs(%q): %v", rel, err)
 	}
 
-	got, err := engine.FileURL(rel)
-	if err != nil {
-		t.Fatalf("FileURL(%q): %v", rel, err)
-	}
+	got := engine.FileURL(rel)
 	parsed, err := url.Parse(got)
 	if err != nil {
 		t.Fatalf("url.Parse(%q): %v", got, err)

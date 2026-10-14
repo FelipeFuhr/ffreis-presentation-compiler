@@ -61,10 +61,7 @@ func (r *PDFRenderer) Render(ctx context.Context, job Job) (string, error) {
 		run = ExecRunner
 	}
 
-	target, err := FileURL(job.IndexPath)
-	if err != nil {
-		return "", fmt.Errorf("pdf: %w", err)
-	}
+	target := FileURL(job.IndexPath)
 
 	// --no-pdf-header-footer drops Chrome's default date/URL furniture;
 	// --no-sandbox and --disable-dev-shm-usage are what make this work inside

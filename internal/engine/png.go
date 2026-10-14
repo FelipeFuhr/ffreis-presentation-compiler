@@ -73,10 +73,7 @@ func (r *PNGRenderer) Render(ctx context.Context, job Job) (string, error) {
 		scale = DefaultPNGScale
 	}
 
-	target, err := FileURL(job.IndexPath)
-	if err != nil {
-		return "", fmt.Errorf("png: %w", err)
-	}
+	target := FileURL(job.IndexPath)
 	shots, err := client.CaptureAll(ctx, target, SlideSelector, scale)
 	if err != nil {
 		return "", fmt.Errorf("png: %w", err)
