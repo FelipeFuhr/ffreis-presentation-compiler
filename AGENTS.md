@@ -163,8 +163,8 @@ the first problem.
 A theme's field vocabulary is declarative, the same idiom as `.Fields`
 itself: `internal/contract/contract.yaml` lists, per layout, the keys it
 `required`s and the keys it additionally `allowed`s; any other front-matter
-key is an error. That file is `//go:embed`ded as the compiler's shipped
-default, describing the sample theme's layouts. A theme overrides it
+key is an error. That file is embedded via `//go:embed` as the compiler's
+shipped default, describing the sample theme's layouts. A theme overrides it
 wholesale with its own `contract.yaml` at its theme root — adding a layout is
 then a YAML change, not a Go change. A `chart:`/`diagram:` block is
 recognised on every layout unconditionally, the same way chrome keys are, so
