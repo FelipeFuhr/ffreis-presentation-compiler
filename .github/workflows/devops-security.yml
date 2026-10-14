@@ -50,6 +50,11 @@ jobs:
     with:
       runner: '["ubuntu-latest"]'
       go-version: "1.26.9"
+      # The callee runs govulncheck under its OWN toolchain input, which
+      # defaults to 1.26.8 — still carrying GO-2026-6617 et al, all fixed at
+      # 1.26.9. Without this the job fails on stdlib CVEs regardless of
+      # go-version above.
+      govulncheck-go-version: "1.26.9"
       working-directory: "."
 
   semgrep:
