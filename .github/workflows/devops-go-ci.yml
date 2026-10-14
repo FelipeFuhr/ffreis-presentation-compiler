@@ -23,10 +23,6 @@ on:
   merge_group:
     types: [checks_requested]
 
-permissions:
-  contents: read
-  actions: write
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
@@ -34,6 +30,8 @@ concurrency:
 
 jobs:
   mod-tidy:
+    permissions:
+      contents: read
     uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-mod-tidy-check.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
       runner: '["ubuntu-latest"]'
@@ -41,6 +39,8 @@ jobs:
       working-directory: "."
 
   fmt:
+    permissions:
+      contents: read
     uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-fmt.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
       runner: '["ubuntu-latest"]'
@@ -48,6 +48,9 @@ jobs:
       working-directory: "."
 
   lint:
+    permissions:
+      contents: read
+      pull-requests: read
     needs: [fmt]
     uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-lint.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
@@ -56,6 +59,9 @@ jobs:
       working-directory: "."
 
   test:
+    permissions:
+      contents: read
+      id-token: write
     if: ${{ !github.event.pull_request.draft }}
 
     needs: [fmt]
@@ -67,6 +73,9 @@ jobs:
       run-govulncheck: false
 
   integration:
+    permissions:
+      contents: read
+      id-token: write
     if: ${{ !github.event.pull_request.draft }}
 
     needs: [fmt]

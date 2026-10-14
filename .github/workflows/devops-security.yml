@@ -55,6 +55,7 @@ jobs:
   semgrep:
     permissions:
       contents: read
+      actions: read
       security-events: write
     uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-semgrep-sarif.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
@@ -78,6 +79,7 @@ jobs:
   lint:
     permissions:
       contents: read
+      pull-requests: read
     uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-lint.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
       runner: '["ubuntu-latest"]'
