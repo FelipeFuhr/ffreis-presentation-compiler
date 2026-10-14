@@ -2,6 +2,10 @@ name: Code Coverage (Codecov)
 
 on:
   pull_request:
+    # Something in this chain skips on a draft PR. Without ready_for_review
+    # the job is never re-triggered when the PR is promoted, so the check
+    # settles as SKIPPED and reads as green having never run.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - '**/*.go'
       - 'go.mod'
