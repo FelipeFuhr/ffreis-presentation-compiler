@@ -260,6 +260,42 @@ two of them significant (32px and 60px of content silently cut).
   deck and theme — and fails unless **all eight rules fire**. Without it a checker
   that silently stopped working would look exactly like a clean deck.
 
+## Golden images (`golden`, `internal/golden/`)
+
+Visual regression for the shipped example deck. Nothing else in this fleet
+owns visual regression today, so this is new, deliberately minimal ground:
+render `examples/sample-deck` to PNG (one image per slide, at 2x — the PNG
+adapter `internal/engine` already ships) and compare each slide against an
+approved baseline committed under `examples/golden/`.
+
+- **The comparison is perceptual, not byte-exact.** Chrome's PNG encoder is
+  not byte-reproducible across versions — subpixel rounding and anti-aliasing
+  shift by a few intensity levels per channel on every release — so a byte
+  compare would fail on every Chrome update and teach everyone to re-approve
+  the baseline without looking. `internal/golden` decodes both images and
+  counts pixels whose combined channel difference exceeds
+  `golden.PixelDiffThreshold`; a slide fails when that count, as a fraction of
+  its total pixels, exceeds `golden.DefaultDiffRatioTolerance` (1%). Only the
+  standard library (`image`, `image/png`) is used — no new dependency for a
+  diff this simple.
+- **A dimension mismatch is a hard failure, not a 100% diff.** Two
+  different-shaped images have no pixel ratio to compute, so `golden` reports
+  the slide and both sizes directly (`SlideResult.DimensionsMatch`) instead of
+  fabricating a number.
+- **`make golden` and `make golden-update` are deliberately separate, and
+  `golden-update` is a plain `cp` in the Makefile, not a Go code path at
+  all.** The `golden` CLI subcommand has no flag that can write to
+  `-baseline`; nothing short of running `make golden-update` by name can ever
+  re-approve it, so a typo in a compare invocation can never turn into a
+  silent re-approval.
+- **A failing slide writes a highlight artifact under `.bin/golden/`**
+  (`<slide>.diff.png`: differing pixels in red, everything else dimmed to
+  grey) and names the path in its own output line, so a human has somewhere
+  to look without being told a bespoke path.
+- Baselines are binary files in a Go repo, so they are kept as small as
+  reasonably possible for a 7-slide deck (~670 KB total as of this writing)
+  and `examples/` is on the large-files hygiene hook's allowlist.
+
 ## Live preview (`serve`)
 
 `serve` renders the deck to a temporary directory, serves it over loopback
@@ -387,6 +423,8 @@ make check-selftest    # prove the checker still catches all eight rules
 make export-selftest   # prove the generated pptx actually opens
 make seo-selftest      # prove every required meta tag is emitted
 make seo-audit         # Lighthouse SEO score against the rendered deck
+make golden            # perceptual diff against the approved baseline (examples/golden/)
+make golden-update     # re-render and re-approve the baseline (never run automatically)
 make doctor            # which adapters are available here
 ```
 
@@ -424,6 +462,7 @@ internal/contract/                 field-vocabulary validation (contract.yaml)
 internal/pathsafe/                 the one path-containment helper, shared by theme/gen/contract
 internal/render/                   document shell + slide assembly (base.gohtml)
 internal/check/                    measured checks (probe.js)
+internal/golden/                   perceptual PNG diff for visual regression
 internal/engine/                   Renderer port, Runner, PDF/PNG/PPTX adapters
 internal/engine/chrome/            CDP client, shared by check + adapters
 internal/engine/pptx/              OOXML writer (assets/ holds the static parts)
@@ -432,6 +471,7 @@ internal/serve/                    live-reload preview: render/watch/HTTP loop
 internal/seo/                      head meta, schema.org, sitemap, robots (leaf)
 internal/logx/                     slog construction
 examples/sample-deck/              brand-free fixture deck
+examples/golden/                   approved baseline PNGs for `make golden`
 examples/themes/sample/            brand-free fixture theme
 examples/check-fixture/            deliberately broken deck, for check-selftest
 examples/themes/check-fixture/     deliberately broken theme, ditto
@@ -441,9 +481,9 @@ examples/contract-fixture/         deliberately broken deck, for validate-selfte
 ## Roadmap
 
 Implemented: content model, theme + layouts, HTML, PDF, PNG, PPTX (image mode),
-the generator hook, `check` (all eight rules), `validate`, the SEO surface,
-`serve`, `doctor`, and five self-tests. Next, in order: golden images;
-model-assisted review.
+the generator hook, `check` (all eight rules), `validate` (all six rules),
+the SEO surface, `serve`, `doctor`, five self-tests, and golden images
+(`golden`/`golden-update`). Next: model-assisted review.
 
 ## Keeping this file current
 

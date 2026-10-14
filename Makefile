@@ -42,7 +42,8 @@ MUTATION_THRESHOLD ?= 60
 	init-github \
 	install build doctor smoke-check check check-selftest export-selftest \
 	validate-deck validate-selftest \
-	seo-selftest seo-audit
+	seo-selftest seo-audit \
+	golden golden-update
 
 ## mutation: run mutation testing with gremlins (slow — CI only)
 mutation:
@@ -340,3 +341,35 @@ failed=[a["id"] for a in r["audits"].values() if a.get("score") == 0]; \
 print("seo-audit: score %.2f (floor $(LIGHTHOUSE_SEO_MIN))" % score); \
 [print("  failed: %s" % f) for f in failed]; \
 sys.exit(0 if score >= $(LIGHTHOUSE_SEO_MIN) else "seo-audit: below the floor")'
+
+# ── Golden images (visual regression) ────────────────────────────────────────
+# Nothing else in this fleet owns visual regression; this is new, minimal
+# ground. Comparison is perceptual (internal/golden), not byte-exact: Chrome's
+# PNG encoder is not reproducible across versions, and a byte compare would
+# fail on every Chrome update and teach everyone to re-approve blindly.
+GOLDEN_BASELINE ?= examples/golden
+GOLDEN_RENDER   ?= .bin/golden-render
+GOLDEN_DIFF     ?= .bin/golden
+
+golden: ## Compare the rendered example deck's PNGs against the approved baseline (perceptual diff)
+	@rm -rf "$(GOLDEN_RENDER)" && mkdir -p "$(GOLDEN_RENDER)"
+	@go run ./cmd/$(BINARY) build -deck-root "$(EXAMPLE_DECK)" \
+		-theme-root "$(EXAMPLE_THEMES)" -out "$(GOLDEN_RENDER)" -formats png >/dev/null
+	@go run ./cmd/$(BINARY) golden -dir "$(GOLDEN_RENDER)/slides" \
+		-baseline "$(GOLDEN_BASELINE)" -diff-dir "$(GOLDEN_DIFF)"
+
+# Deliberately plain `cp`, not a Go code path: the compare target above (make
+# golden) has no flag that writes to GOLDEN_BASELINE at all, so a typo in a
+# compare invocation can never silently re-approve the baseline — only this
+# target, run by name, ever touches it.
+golden-update: ## Re-render and re-approve the golden baseline (never run automatically)
+	@rm -rf "$(GOLDEN_RENDER)" && mkdir -p "$(GOLDEN_RENDER)"
+	@go run ./cmd/$(BINARY) build -deck-root "$(EXAMPLE_DECK)" \
+		-theme-root "$(EXAMPLE_THEMES)" -out "$(GOLDEN_RENDER)" -formats png >/dev/null
+	@mkdir -p "$(GOLDEN_BASELINE)"
+	@rm -f "$(GOLDEN_BASELINE)"/*.png
+	@for f in "$(GOLDEN_RENDER)"/slides/*.png; do \
+		name=$$(basename "$$f"); \
+		cp "$$f" "$(GOLDEN_BASELINE)/$$name"; \
+		echo "golden-update: wrote $(GOLDEN_BASELINE)/$$name"; \
+	done

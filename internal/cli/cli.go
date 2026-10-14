@@ -36,6 +36,8 @@ func run(program string, args []string, stdout, stderr io.Writer) int {
 		return runValidate(args[1:], stdout, stderr)
 	case "check":
 		return runCheck(args[1:], stdout, stderr)
+	case "golden":
+		return runGolden(args[1:], stdout, stderr)
 	case "serve":
 		return runServe(args[1:], stdout, stderr)
 	case "doctor":
@@ -57,6 +59,7 @@ usage:
   %s build     -deck-root <dir> -theme-root <dir> [-out dist] [-formats html,pdf]
   %s validate  -deck-root <dir> -theme-root <dir>
   %s check     [-dir dist] [-theme-root <dir> -theme <name>] [-pdf <file>]
+  %s golden    -dir <rendered-slides-dir> [-baseline examples/golden] [-tolerance 0.01]
   %s serve     -deck-root <dir> -theme-root <dir> [-addr 127.0.0.1:8080]
   %s doctor
 
@@ -65,7 +68,8 @@ commands:
   validate  check a deck against its theme's field contract before rendering
   check     measure a rendered deck: overflow, out-of-bounds, tiny-type,
             contrast, missing-asset, font-fallback, overlap, pdf-pages
+  golden    compare freshly rendered slide PNGs against an approved baseline
   serve     render, serve over loopback HTTP, and reload on source changes
   doctor    report which render adapters are available on this machine
-`, program, program, program, program, program, program)
+`, program, program, program, program, program, program, program)
 }
