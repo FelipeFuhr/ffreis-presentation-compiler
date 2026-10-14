@@ -16,12 +16,16 @@ import (
 // no new dependency, it is immune to the editor-writes-via-rename pattern
 // that makes inotify miss saves from some editors and tools, and a deck is a
 // few dozen small files — a scan this cheap costs nothing at this interval.
-const pollInterval = 300 * time.Millisecond
+//
+// A var, not a const: tests shorten it to drive the watch loop in
+// milliseconds instead of real authoring-sized intervals, restoring it on
+// cleanup. Production code never changes it.
+var pollInterval = 300 * time.Millisecond
 
 // debounceWindow coalesces the handful of mtime changes one save usually
 // produces (a temp file, a rename, a directory mtime bump) into a single
-// rebuild.
-const debounceWindow = 250 * time.Millisecond
+// rebuild. A var for the same test-speed reason as pollInterval.
+var debounceWindow = 250 * time.Millisecond
 
 // fingerprint is a cheap snapshot of a set of directory trees: it changes
 // when a watched file's size or modification time changes, or when a file is

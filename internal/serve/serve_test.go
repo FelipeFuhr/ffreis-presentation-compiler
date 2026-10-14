@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -73,6 +74,51 @@ func TestRunServesThenShutsDownOnContextCancellation(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run did not return after its context was canceled")
+	}
+}
+
+func TestNewRejectsAnEmptyDeckOrThemeRoot(t *testing.T) {
+	cases := []struct {
+		name string
+		opts serve.Options
+	}{
+		{"no deck root", serve.Options{ThemeRoot: sampleThemes}},
+		{"no theme root", serve.Options{DeckRoot: sampleDeck}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := serve.New(tc.opts, discardLogger()); err == nil {
+				t.Fatal("want an error")
+			}
+		})
+	}
+}
+
+// TestNewSurfacesATempDirCreationFailure forces os.MkdirTemp to fail by
+// pointing TMPDIR at a path that does not exist, rather than guessing at an
+// unwritable one — portable and leaves nothing to clean up.
+func TestNewSurfacesATempDirCreationFailure(t *testing.T) {
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))
+
+	_, err := serve.New(serve.Options{DeckRoot: sampleDeck, ThemeRoot: sampleThemes}, discardLogger())
+	if err == nil {
+		t.Fatal("want an error when the temp preview directory cannot be created")
+	}
+}
+
+// TestRunSurfacesAListenFailureBeforeAnyRequestCanBeServed uses a
+// syntactically invalid address so net.Listen fails immediately — no port is
+// ever opened, fixed or otherwise, so this is fast and cannot collide with
+// anything else on the machine.
+func TestRunSurfacesAListenFailureBeforeAnyRequestCanBeServed(t *testing.T) {
+	srv, err := serve.New(serve.Options{DeckRoot: sampleDeck, ThemeRoot: sampleThemes, Addr: "not-an-address"}, discardLogger())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	err = srv.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "listen on") {
+		t.Fatalf("Run error = %v, want a listen failure", err)
 	}
 }
 

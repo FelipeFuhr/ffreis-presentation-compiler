@@ -13,8 +13,9 @@ import (
 )
 
 // shutdownTimeout bounds how long Run waits for in-flight requests to drain
-// on SIGINT before giving up.
-const shutdownTimeout = 5 * time.Second
+// on SIGINT before giving up. A var, not a const, so a test can shorten it to
+// force a deterministic Shutdown deadline instead of waiting out a real one.
+var shutdownTimeout = 5 * time.Second
 
 // readHeaderTimeout bounds how long a client may take to send request
 // headers. This is a local preview server, not internet-facing, but setting
@@ -37,7 +38,19 @@ type Server struct {
 
 // New prepares a Server. It creates the temporary directory the deck is
 // rendered into but does not render or listen yet — that happens in Run.
+//
+// DeckRoot and ThemeRoot are validated here rather than left to the first
+// render: internal/serve is usable without the CLI (which validates them
+// itself), and an empty root would otherwise resolve against the process's
+// working directory inside deck.Load/theme.Load — a confusing failure mode
+// for a direct caller of this package.
 func New(opts Options, logger *slog.Logger) (*Server, error) {
+	if opts.DeckRoot == "" {
+		return nil, fmt.Errorf("deck root is required")
+	}
+	if opts.ThemeRoot == "" {
+		return nil, fmt.Errorf("theme root is required")
+	}
 	outDir, err := os.MkdirTemp("", "ffreis-presentation-compiler-serve-*")
 	if err != nil {
 		return nil, fmt.Errorf("create preview directory: %w", err)

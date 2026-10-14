@@ -289,6 +289,44 @@ func TestServeAddrIsOverridable(t *testing.T) {
 	}
 }
 
+// TestServeExitsWithAnErrorWhenTheServerCannotBeCreated forces serve.New to
+// fail (by pointing TMPDIR at a path that does not exist) and checks that
+// runServe reports it and never reaches the "serving on" banner — this is
+// the branch between parseServeOptions succeeding and srv.Run ever starting.
+func TestServeExitsWithAnErrorWhenTheServerCannotBeCreated(t *testing.T) {
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))
+
+	code, stdout, stderr := exec("serve", "-deck-root", sampleDeck, "-theme-root", sampleThemes)
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if strings.Contains(stdout, "serving on") {
+		t.Errorf("stdout claims to be serving despite serve.New failing:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "serve:") {
+		t.Errorf("stderr does not report the failure:\n%s", stderr)
+	}
+}
+
+// TestServeExitsWithAnErrorWhenItCannotListen uses a syntactically invalid
+// address so net.Listen fails inside Run — no port is ever opened, fixed or
+// otherwise. This covers runServe's last branch (srv.Run returning an
+// error) along with the "serving on" banner that prints just before it.
+func TestServeExitsWithAnErrorWhenItCannotListen(t *testing.T) {
+	code, stdout, stderr := exec("serve",
+		"-deck-root", sampleDeck, "-theme-root", sampleThemes, "-addr", "not-an-address",
+	)
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stdout, "serving on") {
+		t.Errorf("stdout does not show the serving banner:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "listen on") {
+		t.Errorf("stderr does not mention the listen failure:\n%s", stderr)
+	}
+}
+
 func TestCheckIsReachableFromDispatch(t *testing.T) {
 	// Dispatch must route "check" somewhere; with no rendered deck it fails,
 	// which is enough to prove the verb is wired.
