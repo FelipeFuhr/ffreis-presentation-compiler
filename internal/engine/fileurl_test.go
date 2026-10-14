@@ -24,7 +24,7 @@ func TestFileURLRoundTrips(t *testing.T) {
 		{"space", "my deck/index.html"},
 		{"hash", "deck#1/index.html"},
 		{"percent", "100% ready/index.html"},
-		{"non-ASCII", "Grêmio/index.html"},
+		{"non-ASCII", "Diseño Único/index.html"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

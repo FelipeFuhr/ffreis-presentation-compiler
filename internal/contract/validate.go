@@ -23,6 +23,10 @@ const (
 	RuleInvalidField    = "invalid-field"
 	RuleMissingAsset    = "missing-asset"
 	RuleUnsafePath      = "unsafe-path"
+	// RuleUndescribedLayout is the one advisory rule: the theme provides the
+	// layout, so the deck is renderable, but no contract describes its fields
+	// so they went unchecked.
+	RuleUndescribedLayout = "undescribed-layout"
 )
 
 // Finding is one contract violation.
@@ -34,6 +38,24 @@ type Finding struct {
 	Rule   string
 	Key    string
 	Detail string
+	// Fatal distinguishes "this deck is wrong" from "this deck was not fully
+	// checked". Only the former may fail a build: a theme is allowed to ship a
+	// layout with nothing but a template — that is the whole point of the
+	// Fields design — so holding it to a contract it never wrote would make
+	// every existing theme un-buildable on upgrade.
+	Fatal bool
+}
+
+// Fatal reports whether any finding should fail a build. Advisory findings are
+// still printed; silently dropping them would turn the gate vacuous for
+// exactly the themes that most need describing.
+func Fatal(findings []Finding) bool {
+	for _, f := range findings {
+		if f.Fatal {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate checks every slide of d against th's field contract and the
@@ -47,26 +69,70 @@ type Finding struct {
 func Validate(d *deck.Deck, th *theme.Theme, deckRoot string) []Finding {
 	c, err := Load(th.Dir)
 	if err != nil {
-		return []Finding{{Rule: RuleInvalidContract, Detail: err.Error()}}
+		return []Finding{{Rule: RuleInvalidContract, Detail: err.Error(), Fatal: true}}
+	}
+
+	provided := make(map[string]bool, len(th.LayoutNames()))
+	for _, name := range th.LayoutNames() {
+		provided[name] = true
 	}
 
 	var findings []Finding
+	undescribed := map[string]bool{}
 	for _, s := range d.Slides {
-		findings = append(findings, validateSlide(s, c, th, deckRoot)...)
+		findings = append(findings, validateSlide(s, c, th, provided, deckRoot)...)
+		if provided[s.Layout] {
+			if _, described := c.Layouts[s.Layout]; !described {
+				undescribed[s.Layout] = true
+			}
+		}
+	}
+	return append(findings, undescribedFindings(th, undescribed)...)
+}
+
+// undescribedFindings reports once per layout, not once per slide: a theme
+// with ten undescribed layouts across thirty slides should produce ten lines,
+// not thirty.
+func undescribedFindings(th *theme.Theme, undescribed map[string]bool) []Finding {
+	names := make([]string, 0, len(undescribed))
+	for name := range undescribed {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	findings := make([]Finding, 0, len(names))
+	for _, name := range names {
+		findings = append(findings, Finding{
+			Rule: RuleUndescribedLayout, Key: name,
+			Detail: fmt.Sprintf("theme %q provides layout %q but no contract describes its fields, "+
+				"so they were not checked; add it to %s/contract.yaml", th.Name, name, th.Dir),
+		})
 	}
 	return findings
 }
 
-// validateSlide checks one slide's layout and fields. An unknown layout
-// makes every other field check meaningless, so it is reported alone.
-func validateSlide(s deck.Slide, c Contract, th *theme.Theme, deckRoot string) []Finding {
-	layout, ok := c.Layouts[s.Layout]
-	if !ok {
+// validateSlide checks one slide's layout and fields.
+//
+// Whether the layout exists is the *theme's* answer, not the contract's. These
+// were conflated once, and the symptom was an error that read `theme "x" has
+// no layout "table" (available: … table …)` — the decision came from the
+// contract map while the message came from the theme. A theme is allowed to
+// provide layouts no contract describes; what that costs is field checking,
+// not the build.
+//
+// An unknown layout makes every other field check meaningless, so it is
+// reported alone.
+func validateSlide(s deck.Slide, c Contract, th *theme.Theme, provided map[string]bool, deckRoot string) []Finding {
+	if !provided[s.Layout] {
 		return []Finding{{
-			Slide: s.Number, Source: s.Source, Rule: RuleUnknownLayout, Key: s.Layout,
+			Slide: s.Number, Source: s.Source, Rule: RuleUnknownLayout, Key: s.Layout, Fatal: true,
 			Detail: fmt.Sprintf("theme %q has no layout %q (available: %s)",
 				th.Name, s.Layout, strings.Join(th.LayoutNames(), ", ")),
 		}}
+	}
+	layout, described := c.Layouts[s.Layout]
+	if !described {
+		return nil // reported once per layout by undescribedFindings
 	}
 
 	var findings []Finding
@@ -82,7 +148,7 @@ func missingFields(s deck.Slide, layout Layout) []Finding {
 	for _, name := range layout.Required {
 		if _, ok := s.Fields[name]; !ok {
 			findings = append(findings, Finding{
-				Slide: s.Number, Source: s.Source, Rule: RuleMissingField, Key: name,
+				Slide: s.Number, Source: s.Source, Rule: RuleMissingField, Key: name, Fatal: true,
 				Detail: fmt.Sprintf("layout %q requires %q", s.Layout, name),
 			})
 		}
@@ -105,7 +171,7 @@ func fieldFindings(s deck.Slide, layout Layout, deckRoot string) []Finding {
 			findings = append(findings, assetFinding(s, key, s.Fields[key], deckRoot)...)
 		case !known[key]:
 			findings = append(findings, Finding{
-				Slide: s.Number, Source: s.Source, Rule: RuleUnknownField, Key: key,
+				Slide: s.Number, Source: s.Source, Rule: RuleUnknownField, Key: key, Fatal: true,
 				Detail: fmt.Sprintf("layout %q does not declare %q", s.Layout, key),
 			})
 		}
@@ -128,7 +194,7 @@ func isSpecKey(key string) bool {
 func specFindings(s deck.Slide, deckRoot string) []Finding {
 	spec, key, err := gen.SpecOf(&s)
 	if err != nil {
-		return []Finding{{Slide: s.Number, Source: s.Source, Rule: RuleInvalidField, Key: key, Detail: err.Error()}}
+		return []Finding{{Slide: s.Number, Source: s.Source, Rule: RuleInvalidField, Key: key, Detail: err.Error(), Fatal: true}}
 	}
 	if spec == nil {
 		return nil
@@ -147,17 +213,17 @@ func assetFinding(s deck.Slide, key string, raw any, deckRoot string) []Finding 
 	path, ok := raw.(string)
 	if !ok || path == "" {
 		return []Finding{{
-			Slide: s.Number, Source: s.Source, Rule: RuleInvalidField, Key: key,
+			Slide: s.Number, Source: s.Source, Rule: RuleInvalidField, Key: key, Fatal: true,
 			Detail: fmt.Sprintf("%q must be a non-empty string path", key),
 		}}
 	}
 	abs, err := pathsafe.Contain(deckRoot, path)
 	if err != nil {
-		return []Finding{{Slide: s.Number, Source: s.Source, Rule: RuleUnsafePath, Key: key, Detail: err.Error()}}
+		return []Finding{{Slide: s.Number, Source: s.Source, Rule: RuleUnsafePath, Key: key, Detail: err.Error(), Fatal: true}}
 	}
 	if _, err := os.Stat(abs); err != nil {
 		return []Finding{{
-			Slide: s.Number, Source: s.Source, Rule: RuleMissingAsset, Key: key,
+			Slide: s.Number, Source: s.Source, Rule: RuleMissingAsset, Key: key, Fatal: true,
 			Detail: fmt.Sprintf("%s %q does not exist", key, path),
 		}}
 	}
@@ -180,14 +246,25 @@ func Report(findings []Finding) string {
 		return "contract: no findings\n"
 	}
 	var b strings.Builder
+	advisory := 0
 	for _, f := range findings {
 		where := "deck"
 		if f.Slide > 0 {
 			where = fmt.Sprintf("slide %d (%s)", f.Slide, f.Source)
 		}
-		fmt.Fprintf(&b, "%s: %s: %s\n", where, f.Rule, f.Detail)
+		note := ""
+		if !f.Fatal {
+			note = " [advisory]"
+			advisory++
+		}
+		fmt.Fprintf(&b, "%s: %s%s: %s\n", where, f.Rule, note, f.Detail)
 	}
-	fmt.Fprintf(&b, "\ncontract: %d finding(s) across %d rule(s)\n", len(findings), len(Rules(findings)))
+	fmt.Fprintf(&b, "\ncontract: %d finding(s) across %d rule(s)",
+		len(findings), len(Rules(findings)))
+	if advisory > 0 {
+		fmt.Fprintf(&b, "; %d advisory, which do not fail the build", advisory)
+	}
+	b.WriteString("\n")
 	return b.String()
 }
 

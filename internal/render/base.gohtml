@@ -4,17 +4,38 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ .Deck.Title }}</title>
+{{ .Head }}
 <style>
 /* Document shell — owned by the compiler, not the theme. These rules are what
    make one slide equal one PDF page at the deck's physical size; a theme that
    overrode them would break pagination. */
 @page { size: {{ .Size.WidthIn }}in {{ .Size.HeightIn }}in; margin: 0; }
 
+:root {
+  --slide-width: {{ .Size.WidthIn }}in;
+  --slide-height: {{ .Size.HeightIn }}in;
+
+  /* The rem basis, and the only knob that rescales an entire deck.
+     1rem is 1/45 of the slide height — exactly 16px at the 7.5in height both
+     supported aspects share. So the slide is 45rem tall and, at 16:9, 80rem
+     wide, which is what lets a theme reason about the body box in rem at all,
+     and a deck paged at some other physical size rescales as a unit instead
+     of keeping absolute type over a resized page.
+
+     Height rather than width, because 4:3 is narrower at the same height:
+     deriving the basis from the width would silently shrink a 4:3 deck's body
+     text by a quarter.
+
+     Page geometry itself stays in inches. @page takes a physical size, and
+     expressing the paper in units derived from the paper would be circular. */
+  font-size: calc(var(--slide-height) / 45);
+}
+
 html, body { margin: 0; padding: 0; }
 
 .slide {
-  width: {{ .Size.WidthIn }}in;
-  height: {{ .Size.HeightIn }}in;
+  width: var(--slide-width);
+  height: var(--slide-height);
   box-sizing: border-box;
   overflow: hidden;
   position: relative;
@@ -25,8 +46,8 @@ html, body { margin: 0; padding: 0; }
 /* On screen the deck reads as a stack of pages; in print this is inert. */
 @media screen {
   body { background: #e9e7e2; }
-  .slide { margin: 0 auto 0.3in; box-shadow: 0 0.08in 0.3in rgba(0,0,0,.12); }
-  body > .slide:first-child { margin-top: 0.3in; }
+  .slide { margin: 0 auto 1.75rem; box-shadow: 0 0.5rem 1.75rem rgba(0,0,0,.12); }
+  body > .slide:first-child { margin-top: 1.75rem; }
 }
 </style>
 <style>

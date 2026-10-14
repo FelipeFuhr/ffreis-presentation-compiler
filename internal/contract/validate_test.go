@@ -256,3 +256,105 @@ func writeMinimalTheme(t *testing.T) string {
 	}
 	return root
 }
+
+// themeWithExtraLayout copies the sample theme and adds one layout the
+// shipped default contract does not describe, which is the shape of every
+// real brand theme: more layouts than the compiler's own examples.
+func themeWithExtraLayout(t *testing.T, layout string) *theme.Theme {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "extra")
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join(sampleThemes, "sample"))); err != nil {
+		t.Fatalf("copy the sample theme: %v", err)
+	}
+	tpl := filepath.Join(dir, "layouts", layout+".gohtml")
+	if err := os.WriteFile(tpl, []byte(`<div class="x">{{ .Body }}</div>`), 0o600); err != nil {
+		t.Fatalf("write layout: %v", err)
+	}
+	th, err := theme.Load(root, "extra")
+	if err != nil {
+		t.Fatalf("theme.Load: %v", err)
+	}
+	return th
+}
+
+// TestValidateDoesNotCallAProvidedLayoutUnknown is the regression test for a
+// bug that shipped: whether a layout exists was decided from the *contract*
+// while the error message was built from the *theme*, so the report read
+// `theme "x" has no layout "plans-table" (available: … plans-table …)` — it
+// named the layout as both missing and available in one sentence. It made the
+// validator reject every deck whose theme shipped more layouts than the
+// compiler's own examples, which is every real theme.
+func TestValidateDoesNotCallAProvidedLayoutUnknown(t *testing.T) {
+	th := themeWithExtraLayout(t, "profile-table")
+	d := &deck.Deck{Slides: []deck.Slide{
+		{Number: 1, Source: "slides/01-x.md", Layout: "profile-table",
+			Fields: map[string]any{"rows": []any{"a"}}},
+	}}
+
+	findings := contract.Validate(d, th, t.TempDir())
+
+	for _, f := range findings {
+		if f.Rule == contract.RuleUnknownLayout {
+			t.Errorf("a layout the theme provides was reported unknown: %+v", f)
+		}
+		if f.Rule == contract.RuleUnknownField {
+			t.Errorf("fields were checked against a contract that does not describe the layout: %+v", f)
+		}
+	}
+	if contract.Fatal(findings) {
+		t.Errorf("an undescribed layout must not fail a build:\n%s", contract.Report(findings))
+	}
+}
+
+func TestValidateAdvisesOncePerUndescribedLayout(t *testing.T) {
+	// Three slides, one undescribed layout: one line, not three.
+	th := themeWithExtraLayout(t, "profile-table")
+	slides := make([]deck.Slide, 0, 3)
+	for i := 1; i <= 3; i++ {
+		slides = append(slides, deck.Slide{Number: i, Source: "slides/x.md", Layout: "profile-table"})
+	}
+
+	findings := contract.Validate(&deck.Deck{Slides: slides}, th, t.TempDir())
+
+	if len(findings) != 1 {
+		t.Fatalf("findings = %+v, want exactly one advisory", findings)
+	}
+	f := findings[0]
+	if f.Rule != contract.RuleUndescribedLayout || f.Fatal {
+		t.Errorf("finding = %+v, want a non-fatal undescribed-layout", f)
+	}
+	if !strings.Contains(f.Detail, "contract.yaml") {
+		t.Errorf("the advisory does not say how to fix it: %q", f.Detail)
+	}
+}
+
+func TestReportMarksAdvisoryFindings(t *testing.T) {
+	th := themeWithExtraLayout(t, "profile-table")
+	d := &deck.Deck{Slides: []deck.Slide{{Number: 1, Source: "s.md", Layout: "profile-table"}}}
+
+	out := contract.Report(contract.Validate(d, th, t.TempDir()))
+
+	for _, want := range []string{"[advisory]", "do not fail the build"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report does not mark the finding advisory (%q missing):\n%s", want, out)
+		}
+	}
+}
+
+// TestValidateStillFailsAFatalFindingAlongsideAnAdvisory guards the obvious
+// way to get the severity split wrong: letting one advisory finding make the
+// whole report non-fatal.
+func TestValidateStillFailsAFatalFindingAlongsideAnAdvisory(t *testing.T) {
+	th := themeWithExtraLayout(t, "profile-table")
+	d := &deck.Deck{Slides: []deck.Slide{
+		{Number: 1, Source: "s1.md", Layout: "profile-table"},
+		{Number: 2, Source: "s2.md", Layout: "bullets"}, // bullets requires `items`
+	}}
+
+	findings := contract.Validate(d, th, t.TempDir())
+
+	if !contract.Fatal(findings) {
+		t.Errorf("a missing required field stopped being fatal:\n%s", contract.Report(findings))
+	}
+}

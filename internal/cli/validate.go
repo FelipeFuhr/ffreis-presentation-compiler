@@ -58,7 +58,7 @@ func runValidate(args []string, stdout, stderr io.Writer) int {
 
 	findings := contract.Validate(d, th, opts.deckRoot)
 	_, _ = fmt.Fprint(stdout, contract.Report(findings))
-	if len(findings) > 0 {
+	if contract.Fatal(findings) {
 		return exitError
 	}
 	return exitOK
