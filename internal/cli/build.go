@@ -13,6 +13,7 @@ import (
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/gen"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/logx"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/render"
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/seo"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/theme"
 )
 
@@ -37,7 +38,8 @@ func parseBuildOptions(args []string, stderr io.Writer) (*buildOptions, error) {
 	fs.StringVar(&o.out, "out", "dist", "output directory")
 	fs.StringVar(&o.formats, "formats", "html,pdf", "comma-separated outputs: html, pdf, png")
 	fs.StringVar(&o.slug, "slug", "", "artifact basename (default: the deck directory name)")
-	fs.StringVar(&o.lang, "lang", "pt-BR", "document language")
+	fs.StringVar(&o.lang, "lang", "",
+		"document language, overriding deck.yaml's `lang:` (default: the deck's own, else "+deck.DefaultLang+")")
 	fs.BoolVar(&o.verbose, "v", false, "verbose logging")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -89,8 +91,21 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 
-	renderOpts := render.Options{DeckRoot: opts.deckRoot, OutDir: opts.out, Lang: opts.lang}
+	if code := reportSEO(d, opts, stdout, stderr); code != exitOK {
+		return code
+	}
+
+	renderOpts := render.Options{
+		DeckRoot: opts.deckRoot,
+		OutDir:   opts.out,
+		Lang:     opts.lang,
+		Head:     seo.Head(d.Document(opts.lang), d.SEO),
+	}
 	if err := render.Render(d, th, renderOpts); err != nil {
+		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
+		return exitError
+	}
+	if err := writeDiscoveryFiles(d, opts, stdout); err != nil {
 		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
 		return exitError
 	}
@@ -112,6 +127,44 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	return exitOK
+}
+
+// reportSEO prints SEO findings and decides whether they are fatal.
+//
+// There is deliberately no -strict-seo flag: whether a defect matters is
+// already answered by the deck itself. A deck that declares a public address
+// has an audience and a crawler, so a missing description or a relative
+// og:image is a shipping defect and fails the build. A deck with no address is
+// an internal document; the same finding is advice, printed once and not in
+// the way.
+func reportSEO(d *deck.Deck, opts *buildOptions, stdout, stderr io.Writer) int {
+	findings := seo.Validate(d.Document(opts.lang), d.SEO)
+	if len(findings) == 0 {
+		return exitOK
+	}
+	if d.SEO.Published() {
+		_, _ = fmt.Fprint(stderr, seo.Report(findings))
+		_, _ = fmt.Fprintf(stderr, "build: refusing to publish %s with the findings above\n", d.SEO.Canonical())
+		return exitError
+	}
+	_, _ = fmt.Fprint(stdout, seo.Report(findings))
+	return exitOK
+}
+
+// writeDiscoveryFiles emits sitemap.xml and robots.txt for a published deck.
+func writeDiscoveryFiles(d *deck.Deck, opts *buildOptions, stdout io.Writer) error {
+	written, err := seo.Write(opts.out, d.SEO)
+	if err != nil {
+		return err
+	}
+	for _, p := range written {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return err
+		}
+		_, _ = fmt.Fprintln(stdout, abs)
+	}
+	return nil
 }
 
 // renderFormats runs each requested adapter, printing the artifact path it

@@ -43,6 +43,7 @@ type documentContext struct {
 	Size     deck.Size
 	Lang     string
 	CSS      template.CSS
+	Head     template.HTML
 	Sections []template.HTML
 }
 
@@ -51,6 +52,11 @@ type Options struct {
 	DeckRoot string
 	OutDir   string
 	Lang     string
+
+	// Head is extra markup for the document head — the SEO meta block. It is
+	// passed in already rendered rather than built here so this package stays
+	// ignorant of the discovery vocabulary; its job is page geometry.
+	Head template.HTML
 }
 
 // Render writes index.html plus copied assets into opts.OutDir.
@@ -70,16 +76,13 @@ func Render(d *deck.Deck, th *theme.Theme, opts Options) error {
 		return fmt.Errorf("parse document shell: %w", err)
 	}
 
-	lang := opts.Lang
-	if lang == "" {
-		lang = "pt-BR"
-	}
+	lang := d.Language(opts.Lang)
 	var out bytes.Buffer
 	//nolint:gosec // G203: the stylesheet is theme-authored source read from the
 	// operator's own theme root — the same trust boundary as the templates it
 	// styles. It is never derived from deck content or any external input.
 	css := template.CSS(th.CSS)
-	ctx := documentContext{Deck: d, Size: size, Lang: lang, CSS: css, Sections: sections}
+	ctx := documentContext{Deck: d, Size: size, Lang: lang, CSS: css, Head: opts.Head, Sections: sections}
 	if err := base.Execute(&out, ctx); err != nil {
 		return fmt.Errorf("render document shell: %w", err)
 	}

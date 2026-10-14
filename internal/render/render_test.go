@@ -195,6 +195,39 @@ func TestRenderFailsLoudlyOnAnUnknownLayout(t *testing.T) {
 	}
 }
 
+// TestRenderDeclaresTheRemBasis guards the one rule every theme's measurements
+// are expressed against. Themes author purely in rem; the shell is what makes
+// 1rem mean 1/45 of the slide height. Drop that declaration and nothing errors
+// — the browser falls back to its own 16px default, which happens to be the
+// same number at the standard 7.5in height, so the deck renders fine and then
+// silently keeps absolute type the day a deck is paged at any other size.
+func TestRenderDeclaresTheRemBasis(t *testing.T) {
+	_, html, _ := renderSample(t)
+
+	for _, want := range []string{
+		"--slide-height: 7.5in;",
+		"--slide-width: 13.333in;",
+		"font-size: calc(var(--slide-height) / 45);",
+		"width: var(--slide-width);",
+		"height: var(--slide-height);",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("the document shell no longer declares %q", want)
+		}
+	}
+}
+
+// TestRenderKeepsPageGeometryInInches locks the deliberate exception to the
+// rem rule: @page takes a physical paper size, so expressing it in units
+// derived from the paper would be circular.
+func TestRenderKeepsPageGeometryInInches(t *testing.T) {
+	_, html, _ := renderSample(t)
+
+	if !strings.Contains(html, "@page { size: 13.333in 7.5in; margin: 0; }") {
+		t.Error("the @page rule no longer states the physical slide size in inches")
+	}
+}
+
 func TestRenderRejectsAnUnknownAspect(t *testing.T) {
 	d, err := deck.Load(sampleDeck)
 	if err != nil {

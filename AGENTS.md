@@ -64,6 +64,28 @@ page; a theme that overrode those rules would break pagination, which is why the
 document shell lives in the compiler and not in the theme. `make smoke-check`
 asserts PDF page count equals slide count and that the page size is unchanged.
 
+**The shell also declares the rem basis, and themes author purely in rem.**
+`:root { font-size: calc(var(--slide-height) / 45) }` makes 1rem exactly 1/45
+of the slide height — 16px at the 7.5in height both supported aspects share —
+so a slide is 45rem tall and, at 16:9, 80rem wide. That is what lets a theme
+reason about the body box at all, and it is the single knob that rescales a
+whole deck.
+
+- **Height, not width.** 4:3 is narrower at the same height, so deriving the
+  basis from the width would silently shrink a 4:3 deck's body text by a
+  quarter.
+- **Deleting the declaration breaks nothing visibly.** The browser falls back
+  to its own 16px default, which is the same number at 7.5in — so the deck
+  renders correctly today and keeps absolute type the day a deck is paged at
+  any other size. `TestRenderDeclaresTheRemBasis` is what catches that.
+- **Page geometry stays in inches**, deliberately: `@page` takes a physical
+  paper size, and expressing the paper in units derived from the paper would be
+  circular.
+- Themes should put spacing on a 0.25rem (4px) grid. The first theme was
+  authored in inches, which gave nearly every box a fractional pixel height
+  (0.14in = 13.44px); a stack of them accumulated the rounding that
+  `-overflow-tolerance-px` exists to absorb.
+
 ## Generator hook (charts and diagrams)
 
 A slide can declare `chart:` (or its alias `diagram:`) instead of a `media:`
@@ -125,6 +147,61 @@ reproducible.
 fails if it will not open, which is the only check that would have caught any of
 this.
 
+## SEO (`internal/seo`)
+
+A deck served over HTTP gets the same discovery surface as the fleet's
+websites: the meta vocabulary in flemming's `partials/head.gohtml` order,
+`og:*` under `property` and `twitter:*` under `name`, a schema.org block, a
+sitemap and a robots policy. Three things differ on purpose.
+
+- **A deck defaults to `noindex, nofollow`.** A website wants to be found; a
+  deck is usually unpublished client material that happens to be HTML, so the
+  safe default is the opposite one. Setting `seo.base_url` is what declares a
+  deck published — and from that point its SEO contract is a **build gate**,
+  not advice. Without it, a deck gets a title and a noindex and nothing else,
+  and no sitemap or robots.txt is written. There is deliberately no
+  `-strict-seo` flag: the deck already answers whether its defects matter.
+- **The JSON-LD is marshalled, not interpolated.** Every website in the fleet
+  builds its `ld+json` by substituting values into a template literal, so a
+  description containing a quote emits a block no parser accepts — silently,
+  because nothing validates it. `encoding/json` cannot make that mistake, and
+  it escapes `<`/`>` so no value can close the `<script>` early.
+- **`@type` is `PresentationDigitalDocument`**, not `WebPage`. It is accurate,
+  and `numberOfPages` is a property only a document type carries, so a crawler
+  learns the deck's length from the markup.
+
+Also note: `thumbnailUrl` is typed `URL` by schema.org and `image` is
+`ImageObject`-or-`URL`. Putting an `ImageObject` under `thumbnailUrl` is a type
+error nothing in this fleet would have caught.
+
+`internal/seo` is a **leaf package** — it imports nothing from this module, so
+`internal/deck` can hold the `seo:` block. That is why `Head` takes a
+`seo.Document` rather than a `*deck.Deck`.
+
+`seo.Validate` adds the bounds no tool in the fleet checks: title ≤ 60 chars,
+description 50–160, counted in **runes** (a Portuguese title is shorter than
+its byte length). The fleet's own validator asserts presence only, and
+html-validate's `long-title` rule is explicitly switched off.
+
+```bash
+make seo-selftest   # every required tag present + ld+json parses; no Node needed
+make seo-audit      # Lighthouse, SEO category, floor 0.9 — the fleet's gate
+```
+
+`seo-selftest` is the one that runs anywhere; it fails naming each missing tag.
+`seo-audit` pins Lighthouse rather than tracking latest, because a Lighthouse
+minor can move an audit between categories and turn the gate red with no change
+to the deck. It **fails loudly** when Node is absent rather than skipping — a
+skip that reads as a pass is how a gate stops gating.
+
+## Document language
+
+`-lang` defaults to **empty**, resolving as: the flag, then `deck.yaml`'s
+`lang:`, then `deck.DefaultLang` (`"en"`). The language belongs to the content,
+not the invocation. The previous default was `pt-BR` — one consumer's language
+baked into a public, consumer-agnostic compiler, which is exactly what the
+`-deck-root`/`-theme-root` discipline exists to avoid.
+
 ## Checks (`check`)
 
 `check` measures a **rendered** deck over CDP — it reads `dist/index.html`
@@ -162,6 +239,8 @@ make smoke-check     # end-to-end render + pagination assertion
 make check           # render the example deck and measure it
 make check-selftest  # prove the checker still catches all six rules
 make export-selftest # prove the generated pptx actually opens
+make seo-selftest    # prove every required meta tag is emitted
+make seo-audit       # Lighthouse SEO score against the rendered deck
 make doctor          # which adapters are available here
 ```
 
@@ -201,6 +280,7 @@ internal/engine/                   Renderer port, Runner, PDF/PNG/PPTX adapters
 internal/engine/chrome/            CDP client, shared by check + adapters
 internal/engine/pptx/              OOXML writer (assets/ holds the static parts)
 internal/gen/                      generator hook (charts, diagrams) + cache
+internal/seo/                      head meta, schema.org, sitemap, robots (leaf)
 internal/logx/                     slog construction
 examples/sample-deck/              brand-free fixture deck
 examples/themes/sample/            brand-free fixture theme

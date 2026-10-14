@@ -1,5 +1,17 @@
 /* Design tokens. A brand theme replaces the values and keeps the names, so
-   layouts never hardcode a colour. */
+   layouts never hardcode a colour or a measurement.
+ *
+ * EVERY length in this theme is rem. The compiler's document shell sets the
+ * root font size to 1/45 of the slide height — 16px at the standard 7.5in —
+ * so the slide body is 45rem tall and 80rem wide at 16:9, and one knob in the
+ * shell rescales the whole deck. Authoring in in/pt/px instead would pin type
+ * and spacing to the paper and break that.
+ *
+ * The spacing scale is a 0.25rem (4px) grid: --space-N is N * 0.25rem. Whole
+ * pixels are the point — the inch-authored predecessor gave almost every box a
+ * fractional pixel height, and a stack of them accumulated enough rounding to
+ * need an overflow tolerance to absorb it.
+ */
 :root {
   --accent: #2563eb;
   --accent-soft: rgba(37, 99, 235, 0.1);
@@ -13,15 +25,42 @@
   --muted: #667269;
 
   --hairline: rgba(24, 29, 26, 0.08);
-  --shadow: 0 0.06in 0.2in rgba(23, 27, 25, 0.04);
+  --hairline-width: 0.0625rem;
+  --shadow: 0 0.375rem 1.25rem rgba(23, 27, 25, 0.04);
 
-  --radius: 0.08in;
-  --gap: 0.28in;
-  --margin: 0.62in;
+  /* Spacing — a 0.25rem (4px) grid. */
+  --space-05: 0.125rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-13: 3.25rem;
+  --space-15: 3.75rem;
 
+  --radius: 0.5rem;
+  --gap: var(--space-7);
+  --margin: var(--space-15);
+  --rule-weight: 0.1875rem;
+
+  /* Type — every step lands on a whole pixel, and the smallest clears the
+     checker's 11px legibility floor rather than sitting on it. */
   --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --size-kicker: 10.5pt;
-  --size-title: 25pt;
-  --size-body: 13.5pt;
-  --size-small: 10pt;
+  --size-micro: 0.75rem;
+  --size-small: 0.8125rem;
+  --size-table: 1rem;
+  --size-kicker: 0.875rem;
+  --size-body: 1.125rem;
+  --size-subtitle: 1.25rem;
+  --size-label: 1.0625rem;
+  --size-title: 2.0625rem;
+  --size-section: 2.3125rem;
+  --size-display: 2.8125rem;
+  --line-body: 1.45;
+  --line-tight: 1.08;
 }
