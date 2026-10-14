@@ -1,0 +1,7 @@
+# A deliberately broken deck. `make validate-selftest` renders this against
+# the sample theme and asserts every contract rule fires — a validator that
+# silently stopped catching one of these would look exactly like a clean
+# deck without this fixture.
+title: Contract fixture
+theme: sample
+aspect: "16:9"

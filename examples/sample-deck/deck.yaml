@@ -6,3 +6,21 @@ client: Sample Industries
 theme: sample
 aspect: "16:9"
 footer: Sample Industries · Operations
+
+# The discovery surface for a deck served over HTTP. Omit the whole block and
+# the deck stays private: it gets a title and `noindex, nofollow`, and no
+# sitemap or robots.txt is written. Setting base_url is what declares the deck
+# published, and from then on the fields below are a build gate rather than
+# advice — see `make seo-audit`.
+seo:
+  base_url: https://example.com
+  path: /decks/quarterly-operations-review/
+  robots: index, follow, max-image-preview:large
+  organization: Sample Industries
+  description: >-
+    How throughput, unit cost and headcount moved last quarter, and the four
+    changes we are making next quarter.
+  image: /assets/og-quarterly-review.png
+  image_alt: Quarterly operations review cover slide
+  date_published: "2026-10-14"
+  keywords: [operations, throughput, quarterly review]

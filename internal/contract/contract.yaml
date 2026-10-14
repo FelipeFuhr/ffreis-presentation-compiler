@@ -1,0 +1,30 @@
+# The compiler's shipped field vocabulary — the layouts examples/themes/sample
+# provides, each as the front-matter keys beyond deck.go's chrome fields
+# (layout, kicker, title, phase, badge, notes, skip).
+#
+# A theme overrides this wholesale with its own contract.yaml at its own
+# root; absent one, this file applies. Adding a layout here is a YAML
+# change, not a Go change — the same philosophy as Slide.Fields.
+#
+# `chart:`/`diagram:` blocks are not listed per layout: the generator hook
+# recognises them on any layout, the same way chrome keys are recognised
+# everywhere, so they are never part of a layout's own vocabulary.
+layouts:
+  cover:
+    required: []
+    allowed: []
+  section:
+    required: []
+    allowed: []
+  bullets:
+    required: [items]
+    allowed: []
+  table:
+    required: [columns, rows]
+    allowed: [highlight_row, source]
+  split:
+    required: [alt]
+    allowed: [media]
+  hero-media:
+    required: [alt]
+    allowed: [media, caption]

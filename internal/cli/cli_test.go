@@ -241,6 +241,239 @@ func TestCheckOptionDefaults(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresItsRoots(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no deck root", []string{"validate", "-theme-root", sampleThemes}, "-deck-root is required"},
+		{"no theme root", []string{"validate", "-deck-root", sampleDeck}, "-theme-root is required"},
+		{"unparsable flag", []string{"validate", "-nonsense"}, "flag provided but not defined"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, _, stderr := exec(tc.args...)
+			if code != exitUsage {
+				t.Errorf("exit code = %d, want %d", code, exitUsage)
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Errorf("stderr does not mention %q:\n%s", tc.want, stderr)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsTheShippedSampleDeck(t *testing.T) {
+	code, stdout, stderr := exec("validate", "-deck-root", sampleDeck, "-theme-root", sampleThemes)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstdout: %sstderr: %s", code, exitOK, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "no findings") {
+		t.Errorf("stdout does not report a clean deck:\n%s", stdout)
+	}
+}
+
+func TestValidateFailsLoudlyOnAMalformedDeck(t *testing.T) {
+	// examples/contract-fixture is deliberately broken; make validate-selftest
+	// asserts every rule fires, this just proves the subcommand reports at
+	// least one of them and exits non-zero.
+	code, stdout, stderr := exec("validate",
+		"-deck-root", "../../examples/contract-fixture",
+		"-theme-root", sampleThemes,
+	)
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d\nstderr: %s", code, exitError, stderr)
+	}
+	if !strings.Contains(stdout, "unknown-field") {
+		t.Errorf("stdout does not report the fixture's known violation:\n%s", stdout)
+	}
+}
+
+func TestValidateReportsAnUnloadableDeck(t *testing.T) {
+	code, _, stderr := exec("validate",
+		"-deck-root", "does/not/exist",
+		"-theme-root", sampleThemes,
+	)
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr, "deck.yaml") {
+		t.Errorf("stderr does not mention the deck: %s", stderr)
+	}
+}
+
+func TestValidateIsReachableFromDispatch(t *testing.T) {
+	code, _, _ := exec("validate", "-deck-root", t.TempDir(), "-theme-root", sampleThemes)
+	if code == exitUsage {
+		t.Error("validate is not wired into dispatch")
+	}
+}
+
+func TestBuildAbortsOnAContractViolation(t *testing.T) {
+	code, _, stderr := exec("build",
+		"-deck-root", "../../examples/contract-fixture",
+		"-theme-root", sampleThemes,
+		"-out", t.TempDir(),
+		"-formats", "html",
+	)
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr, "contract:") {
+		t.Errorf("stderr does not report a contract finding:\n%s", stderr)
+	}
+}
+
+func TestCheckIsReachableFromDispatch(t *testing.T) {
+	// Dispatch must route "check" somewhere; with no rendered deck it fails,
+	// which is enough to prove the verb is wired.
+	code, _, _ := exec("check", "-dir", t.TempDir())
+	if code == exitUsage {
+		t.Error("check is not wired into dispatch")
+	}
+}
+
+// deckWithSEO copies the sample deck into a temp dir and rewrites its seo:
+// block, so a test can exercise one SEO outcome without touching the fixture
+// every other test depends on.
+func deckWithSEO(t *testing.T, seoBlock string) string {
+	t.Helper()
+	dir := t.TempDir()
+	// The whole tree, not just slides/: one sample slide declares a chart, and
+	// leaving charts/ and data/ behind fails the build before SEO is reached.
+	if err := os.CopyFS(dir, os.DirFS(sampleDeck)); err != nil {
+		t.Fatalf("copy the sample deck: %v", err)
+	}
+
+	manifest := "title: Quarterly Operations Review\n" +
+		"subtitle: Throughput, cost and the plan for next quarter\n" +
+		"theme: sample\nlang: en\n" + seoBlock
+	if err := os.WriteFile(filepath.Join(dir, "deck.yaml"), []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write deck.yaml: %v", err)
+	}
+	return dir
+}
+
+// TestBuildRefusesToPublishADeckWithSEOFindings is the point of having no
+// -strict-seo flag: the deck's own base_url is what makes its SEO defects
+// fatal, so a published deck missing a description fails the build.
+func TestBuildRefusesToPublishADeckWithSEOFindings(t *testing.T) {
+	deck := deckWithSEO(t, "seo:\n  base_url: https://example.com\n  path: /q3/\n")
+
+	code, _, stderr := exec("build", "-deck-root", deck, "-theme-root", sampleThemes,
+		"-out", t.TempDir(), "-formats", "html")
+
+	if code == exitOK {
+		t.Fatalf("a published deck with no description, organization or image built cleanly\n%s", stderr)
+	}
+	for _, want := range []string{"seo.organization", "seo.image", "refusing to publish", "https://example.com/q3/"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr does not mention %q:\n%s", want, stderr)
+		}
+	}
+}
+
+// TestBuildOnlyAdvisesAPrivateDeck is the other half: the same defects on a
+// deck with no public address are not worth failing a build over, and are not
+// reported at all unless they are about the title.
+func TestBuildOnlyAdvisesAPrivateDeck(t *testing.T) {
+	deck := deckWithSEO(t, "")
+
+	code, stdout, stderr := exec("build", "-deck-root", deck, "-theme-root", sampleThemes,
+		"-out", t.TempDir(), "-formats", "html")
+
+	if code != exitOK {
+		t.Fatalf("a private deck failed to build: %s", stderr)
+	}
+	if strings.Contains(stdout, "seo.") || strings.Contains(stderr, "seo.") {
+		t.Errorf("a private deck was held to the published contract:\n%s\n%s", stdout, stderr)
+	}
+}
+
+func TestBuildReportsAnOverlongTitleEvenPrivately(t *testing.T) {
+	dir := deckWithSEO(t, "")
+	manifest := "title: " + strings.Repeat("Quarterly Operations Review ", 4) +
+		"\ntheme: sample\nlang: en\n"
+	if err := os.WriteFile(filepath.Join(dir, "deck.yaml"), []byte(manifest), 0o600); err != nil {
+		t.Fatalf("write deck.yaml: %v", err)
+	}
+
+	code, stdout, stderr := exec("build", "-deck-root", dir, "-theme-root", sampleThemes,
+		"-out", t.TempDir(), "-formats", "html")
+
+	if code != exitOK {
+		t.Fatalf("an overlong title should advise, not fail: %s", stderr)
+	}
+	if !strings.Contains(stdout, "title") {
+		t.Errorf("the overlong title was not reported:\n%s", stdout)
+	}
+}
+
+func TestBuildWritesDiscoveryFilesForAPublishedDeck(t *testing.T) {
+	deck := deckWithSEO(t, "seo:\n"+
+		"  base_url: https://example.com\n"+
+		"  path: /q3/\n"+
+		"  robots: index, follow\n"+
+		"  organization: Sample Industries\n"+
+		"  description: How throughput, unit cost and headcount moved last quarter, and what changes next.\n"+
+		"  image: /assets/og.png\n"+
+		"  image_alt: Cover slide\n")
+	out := t.TempDir()
+
+	code, stdout, stderr := exec("build", "-deck-root", deck, "-theme-root", sampleThemes,
+		"-out", out, "-formats", "html")
+
+	if code != exitOK {
+		t.Fatalf("build failed: %s", stderr)
+	}
+	for _, name := range []string{"sitemap.xml", "robots.txt"} {
+		if info, err := os.Stat(filepath.Join(out, name)); err != nil || info.Size() == 0 {
+			t.Errorf("%s was not written: %v", name, err)
+		}
+		// build prints every artifact path it produced; the discovery files are
+		// artifacts too, or a caller cannot find them to upload.
+		if !strings.Contains(stdout, name) {
+			t.Errorf("build did not print the path of %s:\n%s", name, stdout)
+		}
+	}
+}
+
+func TestBuildResolvesTheLanguageFromTheDeckThenTheFlag(t *testing.T) {
+	// The language belongs to the content, so deck.yaml wins over the default
+	// and the flag wins over deck.yaml.
+	dir := deckWithSEO(t, "")
+	if err := os.WriteFile(filepath.Join(dir, "deck.yaml"),
+		[]byte("title: T\ntheme: sample\nlang: pt-BR\n"), 0o600); err != nil {
+		t.Fatalf("write deck.yaml: %v", err)
+	}
+
+	cases := []struct{ flag, want string }{
+		{"", `<html lang="pt-BR">`},
+		{"es-AR", `<html lang="es-AR">`},
+	}
+	for _, tc := range cases {
+		t.Run("flag="+tc.flag, func(t *testing.T) {
+			out := t.TempDir()
+			args := []string{"build", "-deck-root", dir, "-theme-root", sampleThemes,
+				"-out", out, "-formats", "html"}
+			if tc.flag != "" {
+				args = append(args, "-lang", tc.flag)
+			}
+
+			if code, _, stderr := exec(args...); code != exitOK {
+				t.Fatalf("build failed: %s", stderr)
+			}
+			html, err := os.ReadFile(filepath.Join(out, "index.html"))
+			if err != nil {
+				t.Fatalf("read index: %v", err)
+			}
+			if !strings.Contains(string(html), tc.want) {
+				t.Errorf("rendered html does not contain %q", tc.want)
+			}
+		})
+	}
+}
 func TestServeRequiresItsRoots(t *testing.T) {
 	cases := []struct {
 		name string
@@ -324,14 +557,5 @@ func TestServeExitsWithAnErrorWhenItCannotListen(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "listen on") {
 		t.Errorf("stderr does not mention the listen failure:\n%s", stderr)
-	}
-}
-
-func TestCheckIsReachableFromDispatch(t *testing.T) {
-	// Dispatch must route "check" somewhere; with no rendered deck it fails,
-	// which is enough to prove the verb is wired.
-	code, _, _ := exec("check", "-dir", t.TempDir())
-	if code == exitUsage {
-		t.Error("check is not wired into dispatch")
 	}
 }

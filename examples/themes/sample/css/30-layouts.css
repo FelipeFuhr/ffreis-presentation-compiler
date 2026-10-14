@@ -1,29 +1,29 @@
 /* ── cover ───────────────────────────────────────────────────────────────── */
 .cover-kicker {
-  margin: 0 0 0.22in;
-  font-size: 13pt;
+  margin: 0 0 var(--space-5);
+  font-size: var(--size-label);
   font-weight: 700;
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--accent-text);
 }
 .cover-title {
-  margin: 0 0 0.18in;
-  font-size: 34pt;
-  line-height: 1.08;
+  margin: 0 0 var(--space-4);
+  font-size: var(--size-display);
+  line-height: var(--line-tight);
   font-weight: 700;
   color: var(--ink-strong);
-  max-width: 9in;
+  max-width: 54rem;
 }
 .cover-subtitle {
   margin: 0;
-  font-size: 15.5pt;
+  font-size: var(--size-subtitle);
   color: var(--muted);
 }
 .cover-rule {
-  width: 0.5in;
-  height: 3px;
-  margin: 0.3in auto;
+  width: var(--space-12);
+  height: var(--rule-weight);
+  margin: var(--space-7) auto;
   border: 0;
   background: var(--accent);
 }
@@ -39,8 +39,8 @@
 
 /* ── section divider ─────────────────────────────────────────────────────── */
 .section-label {
-  margin: 0 0 0.12in;
-  font-size: 13pt;
+  margin: 0 0 var(--space-3);
+  font-size: var(--size-label);
   font-weight: 700;
   letter-spacing: 0.22em;
   text-transform: uppercase;
@@ -48,7 +48,7 @@
 }
 .section-title {
   margin: 0;
-  font-size: 28pt;
+  font-size: var(--size-section);
   font-weight: 700;
   color: var(--ink-strong);
 }
@@ -57,25 +57,27 @@
 .bullets { margin: 0; padding: 0; list-style: none; }
 .bullets li {
   position: relative;
-  padding-left: 0.34in;
-  margin-bottom: 0.2in;
+  padding-left: var(--space-8);
+  margin-bottom: var(--space-5);
 }
 .bullets li::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 0.08in;
-  width: 0.14in;
-  height: 0.14in;
+  top: var(--space-2);
+  width: var(--space-3);
+  height: var(--space-3);
   border-radius: 50%;
   background: var(--accent);
 }
 
 /* ── table ───────────────────────────────────────────────────────────────── */
+/* A table stays a <table>: the data is tabular, and the element carries the
+   row/column semantics that a flex grid would have to fake. */
 .deck-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12pt;
+  font-size: var(--size-table);
 }
 .deck-table th {
   background: var(--ink-strong);
@@ -85,8 +87,8 @@
 }
 .deck-table th,
 .deck-table td {
-  padding: 0.09in 0.12in;
-  border: 1px solid var(--hairline);
+  padding: var(--space-2) var(--space-3);
+  border: var(--hairline-width) solid var(--hairline);
   vertical-align: middle;
 }
 .deck-table tbody tr:nth-child(odd) td { background: var(--paper); }
@@ -96,53 +98,67 @@
   font-weight: 700;
 }
 .table-source {
-  margin-top: 0.16in;
-  font-size: 9.5pt;
+  margin-top: var(--space-4);
+  font-size: var(--size-small);
   color: var(--muted);
 }
 
 /* ── split: media beside commentary ──────────────────────────────────────── */
+/* Flex, not grid: the ratio is the only thing the track list was carrying, and
+   `flex: 1.35 1 0` says it on the item that owns it. `min-width: 0` is the
+   load-bearing part — a flex item's default `min-width: auto` refuses to
+   shrink below its content, so a long unbroken string would push the media
+   column off the slide instead of being clipped by it. */
 .split {
-  display: grid;
-  grid-template-columns: 1.35fr 1fr;
+  display: flex;
   gap: var(--gap);
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .split-media {
+  flex: 1.35 1 0;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.14in;
+  padding: var(--space-3);
   background: #fff;
-  border: 1px solid var(--hairline);
+  border: var(--hairline-width) solid var(--hairline);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   min-height: 0;
 }
 .split-media img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.split-copy { align-self: center; }
+.split-copy {
+  flex: 1 1 0;
+  min-width: 0;
+  align-self: center;
+}
 
 /* ── hero media ──────────────────────────────────────────────────────────── */
+/* `flex: 1 1 auto; min-height: 0` rather than `height: 100%`: the parent is a
+   flex column whose own height is flexible, so a percentage height resolves
+   against a value that is still being computed. */
 .hero-media {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  flex: 1 1 auto;
   min-height: 0;
 }
 .hero-media img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  border: 1px solid var(--hairline);
+  border: var(--hairline-width) solid var(--hairline);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
 .media-caption {
   flex: 0 0 auto;
-  margin-top: 0.16in;
+  margin-top: var(--space-4);
   text-align: center;
-  font-size: 9.5pt;
+  font-size: var(--size-small);
   font-style: italic;
   color: var(--muted);
 }

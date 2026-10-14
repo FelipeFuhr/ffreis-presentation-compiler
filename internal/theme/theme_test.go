@@ -74,6 +74,24 @@ func TestLoadRejectsBrokenThemes(t *testing.T) {
 		}
 	})
 
+	t.Run("theme name contains a path separator", func(t *testing.T) {
+		if _, err := theme.Load(examplesRoot, "sample/../sample"); err == nil {
+			t.Fatal("want an error: a theme name must be a single directory name")
+		}
+	})
+
+	t.Run("theme name is a traversal attempt", func(t *testing.T) {
+		if _, err := theme.Load(examplesRoot, "../../../etc"); err == nil {
+			t.Fatal("want an error: a theme name may not escape the themes root")
+		}
+	})
+
+	t.Run("theme name is an absolute path", func(t *testing.T) {
+		if _, err := theme.Load(examplesRoot, "/etc"); err == nil {
+			t.Fatal("want an error: a theme name is a directory name, not a path")
+		}
+	})
+
 	t.Run("theme path is a file", func(t *testing.T) {
 		root := t.TempDir()
 		if err := os.WriteFile(filepath.Join(root, "flat"), []byte("x"), 0o600); err != nil {

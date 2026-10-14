@@ -64,6 +64,28 @@ page; a theme that overrode those rules would break pagination, which is why the
 document shell lives in the compiler and not in the theme. `make smoke-check`
 asserts PDF page count equals slide count and that the page size is unchanged.
 
+**The shell also declares the rem basis, and themes author purely in rem.**
+`:root { font-size: calc(var(--slide-height) / 45) }` makes 1rem exactly 1/45
+of the slide height — 16px at the 7.5in height both supported aspects share —
+so a slide is 45rem tall and, at 16:9, 80rem wide. That is what lets a theme
+reason about the body box at all, and it is the single knob that rescales a
+whole deck.
+
+- **Height, not width.** 4:3 is narrower at the same height, so deriving the
+  basis from the width would silently shrink a 4:3 deck's body text by a
+  quarter.
+- **Deleting the declaration breaks nothing visibly.** The browser falls back
+  to its own 16px default, which is the same number at 7.5in — so the deck
+  renders correctly today and keeps absolute type the day a deck is paged at
+  any other size. `TestRenderDeclaresTheRemBasis` is what catches that.
+- **Page geometry stays in inches**, deliberately: `@page` takes a physical
+  paper size, and expressing the paper in units derived from the paper would be
+  circular.
+- Themes should put spacing on a 0.25rem (4px) grid. The first theme was
+  authored in inches, which gave nearly every box a fractional pixel height
+  (0.14in = 13.44px); a stack of them accumulated the rounding that
+  `-overflow-tolerance-px` exists to absorb.
+
 ## Generator hook (charts and diagrams)
 
 A slide can declare `chart:` (or its alias `diagram:`) instead of a `media:`
@@ -125,6 +147,61 @@ reproducible.
 fails if it will not open, which is the only check that would have caught any of
 this.
 
+## SEO (`internal/seo`)
+
+A deck served over HTTP gets the same discovery surface as the fleet's
+websites: the same meta vocabulary a consumer site's head partial emits,
+`og:*` under `property` and `twitter:*` under `name`, a schema.org block, a
+sitemap and a robots policy. Three things differ on purpose.
+
+- **A deck defaults to `noindex, nofollow`.** A website wants to be found; a
+  deck is usually unpublished client material that happens to be HTML, so the
+  safe default is the opposite one. Setting `seo.base_url` is what declares a
+  deck published — and from that point its SEO contract is a **build gate**,
+  not advice. Without it, a deck gets a title and a noindex and nothing else,
+  and no sitemap or robots.txt is written. There is deliberately no
+  `-strict-seo` flag: the deck already answers whether its defects matter.
+- **The JSON-LD is marshalled, not interpolated.** Every website in the fleet
+  builds its `ld+json` by substituting values into a template literal, so a
+  description containing a quote emits a block no parser accepts — silently,
+  because nothing validates it. `encoding/json` cannot make that mistake, and
+  it escapes `<`/`>` so no value can close the `<script>` early.
+- **`@type` is `PresentationDigitalDocument`**, not `WebPage`. It is accurate,
+  and `numberOfPages` is a property only a document type carries, so a crawler
+  learns the deck's length from the markup.
+
+Also note: `thumbnailUrl` is typed `URL` by schema.org and `image` is
+`ImageObject`-or-`URL`. Putting an `ImageObject` under `thumbnailUrl` is a type
+error nothing in this fleet would have caught.
+
+`internal/seo` is a **leaf package** — it imports nothing from this module, so
+`internal/deck` can hold the `seo:` block. That is why `Head` takes a
+`seo.Document` rather than a `*deck.Deck`.
+
+`seo.Validate` adds the bounds no tool in the fleet checks: title ≤ 60 chars,
+description 50–160, counted in **runes** (a Portuguese title is shorter than
+its byte length). The fleet's own validator asserts presence only, and
+html-validate's `long-title` rule is explicitly switched off.
+
+```bash
+make seo-selftest   # every required tag present + ld+json parses; no Node needed
+make seo-audit      # Lighthouse, SEO category, floor 0.9 — the fleet's gate
+```
+
+`seo-selftest` is the one that runs anywhere; it fails naming each missing tag.
+`seo-audit` pins Lighthouse rather than tracking latest, because a Lighthouse
+minor can move an audit between categories and turn the gate red with no change
+to the deck. It **fails loudly** when Node is absent rather than skipping — a
+skip that reads as a pass is how a gate stops gating.
+
+## Document language
+
+`-lang` defaults to **empty**, resolving as: the flag, then `deck.yaml`'s
+`lang:`, then `deck.DefaultLang` (`"en"`). The language belongs to the content,
+not the invocation. The previous default was `pt-BR` — one consumer's language
+baked into a public, consumer-agnostic compiler, which is exactly what the
+`-deck-root`/`-theme-root` discipline exists to avoid.
+
 ## Checks (`check`)
 
 `check` measures a **rendered** deck over CDP — it reads `dist/index.html`
@@ -175,6 +252,73 @@ HTTP, and re-renders plus reloads the browser when a source file changes.
   `charts/`, `data/`) plus the one theme directory the deck currently
   resolves to, so editing the theme reloads too.
 
+## Contract (`validate`)
+
+`validate` checks a **loaded** deck against its theme's field vocabulary
+before anything renders — `deck.Load` itself only fails on a missing
+`layout:` key, so without this stage a bad field reaches a Go template and
+produces either a blank region or a confusing template error three steps
+downstream. `build` runs the same check before generators and render, and
+aborts on **fatal** findings; there is no flag to skip it. Both report every
+finding in one pass, naming the slide's source file and the offending key,
+not just the first problem.
+
+A theme's field vocabulary is declarative, the same idiom as `.Fields`
+itself: `internal/contract/contract.yaml` lists, per layout, the keys it
+`required`s and the keys it additionally `allowed`s; any other front-matter
+key is an error. That file is embedded via `//go:embed` as the compiler's
+shipped default, describing the sample theme's layouts. A theme overrides it
+wholesale with its own `contract.yaml` at its theme root — adding a layout is
+then a YAML change, not a Go change. A `chart:`/`diagram:` block is
+recognised on every layout unconditionally, the same way chrome keys are, so
+it is never part of a layout's own vocabulary.
+
+Fatal rules: `unknown-layout`, `missing-field`, `unknown-field`,
+`missing-asset` (a `media`, or a chart/diagram `spec`/`data`, that does not
+exist on disk), `unsafe-path`, `invalid-field` (a malformed chart/diagram
+block, or an asset field that is not a non-empty string),
+`invalid-contract` (a theme's own `contract.yaml` fails to parse).
+
+**`undescribed-layout` is the one advisory rule, and the split matters.**
+Whether a layout exists is the *theme's* answer — `theme.LayoutNames()` —
+never the contract's. Conflating the two shipped a validator that rejected
+every deck whose theme has more layouts than the compiler's own examples,
+with a report that read `theme "x" has no layout "table" (available: …
+table …)`: the decision came from the contract map while the message came
+from the theme. A theme is allowed to ship a layout with nothing but a
+template — that is the entire point of `.Fields` — so an undescribed layout
+costs field checking, not the build. It is reported once per layout rather
+than once per slide, names the `contract.yaml` path that would fix it, and
+`contract.Fatal` is what callers gate on. Skipping it silently instead
+would make the gate vacuous for exactly the themes that most need
+describing.
+
+Deliberately not implemented: a
+duplicate-slide-id check. Two slides sharing a title and layout is not an
+error — a consumer deck legitimately repeats slides — and detecting a
+duplicate by source basename alone could not be made precise without risking
+false positives, so the rule was skipped rather than shipped noisy.
+
+**Path containment is the security-sensitive part.** Three places resolve a
+deck- or theme-author-supplied path against a root: `theme.Load` joins
+`deck.yaml`'s `theme:` value onto the themes root; `gen.Registry.Resolve`
+joins a chart/diagram block's `spec`/`data` onto the deck root; `validate`
+itself joins a slide's `media` (and, redundantly, the same chart/diagram
+`spec`/`data`) onto the deck root to check it exists. `filepath.Join` alone
+does not stop a `..` traversal, and a naive `strings.HasPrefix` check on the
+joined absolute path is its own trap — root `/a/deck` has the same string
+prefix as the unrelated sibling `/a/deckx/f`. `internal/pathsafe.Contain` is
+the one helper all three call: it resolves via `filepath.Rel` and rejects an
+absolute candidate outright, so every call site gets the same answer to "does
+this still live under root". A theme name additionally may not contain a
+path separator at all — it names a single subdirectory, never a path — which
+`theme.Load` rejects before the join is even attempted.
+
+`make validate-selftest` renders `examples/contract-fixture` — a
+deliberately broken deck against the sample theme — and fails unless **all
+five rules fire**. Without it a validator that silently stopped catching one
+of them would look exactly like a clean deck.
+
 ## Commands
 
 ```bash
@@ -183,14 +327,20 @@ go run ./cmd/ffreis-presentation-compiler build \
   -out dist -formats html,pdf
 go run ./cmd/ffreis-presentation-compiler serve \
   -deck-root examples/sample-deck -theme-root examples/themes -addr 127.0.0.1:8080
+go run ./cmd/ffreis-presentation-compiler validate \
+  -deck-root examples/sample-deck -theme-root examples/themes
 go run ./cmd/ffreis-presentation-compiler doctor
 
-make build           # render the example deck (override DECK= THEMES= OUT= FORMATS=)
-make smoke-check     # end-to-end render + pagination assertion
-make check           # render the example deck and measure it
-make check-selftest  # prove the checker still catches all six rules
-make export-selftest # prove the generated pptx actually opens
-make doctor          # which adapters are available here
+make build             # render the example deck (override DECK= THEMES= OUT= FORMATS=)
+make validate-deck     # check the example deck's contract (override DECK= THEMES=)
+make validate-selftest # prove the validator still catches all five rules
+make smoke-check       # end-to-end render + pagination assertion
+make check             # render the example deck and measure it
+make check-selftest    # prove the checker still catches all six rules
+make export-selftest   # prove the generated pptx actually opens
+make seo-selftest      # prove every required meta tag is emitted
+make seo-audit         # Lighthouse SEO score against the rendered deck
+make doctor            # which adapters are available here
 ```
 
 ## Non-obvious facts
@@ -223,6 +373,8 @@ cmd/ffreis-presentation-compiler/  one-liner → cli.Run
 internal/cli/                      dispatch + per-subcommand flag sets
 internal/deck/                     content model and loader
 internal/theme/                    theme loading, template FuncMap
+internal/contract/                 field-vocabulary validation (contract.yaml)
+internal/pathsafe/                 the one path-containment helper, shared by theme/gen/contract
 internal/render/                   document shell + slide assembly (base.gohtml)
 internal/check/                    measured checks (probe.js)
 internal/engine/                   Renderer port, Runner, PDF/PNG/PPTX adapters
@@ -230,11 +382,13 @@ internal/engine/chrome/            CDP client, shared by check + adapters
 internal/engine/pptx/              OOXML writer (assets/ holds the static parts)
 internal/gen/                      generator hook (charts, diagrams) + cache
 internal/serve/                    live-reload preview: render/watch/HTTP loop
+internal/seo/                      head meta, schema.org, sitemap, robots (leaf)
 internal/logx/                     slog construction
 examples/sample-deck/              brand-free fixture deck
 examples/themes/sample/            brand-free fixture theme
 examples/check-fixture/            deliberately broken deck, for check-selftest
 examples/themes/check-fixture/     deliberately broken theme, ditto
+examples/contract-fixture/         deliberately broken deck, for validate-selftest
 ```
 
 ## Roadmap
@@ -244,6 +398,10 @@ the generator hook, `check`, `serve` (live-reload preview), `doctor`, and three
 self-tests. Next, in order: an explicit contract file for deck.yaml; an
 `overlap` rule (deferred — parent/child and absolutely-positioned chrome make
 it the most false-positive-prone of the set); model-assisted review.
+the generator hook, `check`, `validate`, `doctor`, and four self-tests. Next,
+in order: an `overlap` rule (deferred — parent/child and absolutely-positioned
+chrome make it the most false-positive-prone of the set); `serve --watch`;
+model-assisted review.
 
 ## Keeping this file current
 
