@@ -10,7 +10,10 @@ jobs:
   sbom:
     permissions:
       contents: read
-    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-sbom.yml@8ff19efd329b76bce5ff5b98074b9aec74b239da
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-sbom.yml@3c4c9012ea1e8edfda316cf0d87052b33e5fa3fe # v2.1.0
     with:
+      # v2.1.0 resolves runs-on from this input and defaults it to
+      # ["self-hosted","local"], which a public repo cannot reach.
+      runner: '["ubuntu-latest"]'
       artifact-name: "ffreis-presentation-compiler-sbom"
       format: "spdx-json"
