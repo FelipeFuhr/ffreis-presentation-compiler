@@ -43,7 +43,7 @@ MUTATION_THRESHOLD ?= 60
 	install build doctor smoke-check check check-selftest export-selftest \
 	validate-deck validate-selftest \
 	seo-selftest seo-audit \
-	golden golden-update
+	golden golden-update review metrics
 
 ## mutation: run mutation testing with gremlins (slow — CI only)
 mutation:
@@ -373,3 +373,41 @@ golden-update: ## Re-render and re-approve the golden baseline (never run automa
 		cp "$$f" "$(GOLDEN_BASELINE)/$$name"; \
 		echo "golden-update: wrote $(GOLDEN_BASELINE)/$$name"; \
 	done
+
+# ── Model-assisted review (advisory, never a gate) ───────────────────────────
+METRICS_OUT ?= .bin/metrics.json
+MODELCTL_PROJECT ?= /media/ffreis/second/projects/ffreis-modelctl
+MODELCTL_ROOT    ?= /media/ffreis/second/projects
+MODELCTL_WORKSPACE ?= ws-shared
+
+metrics: ## Render the example deck and extract per-slide layout metrics as JSON
+	@rm -rf "$(CHECK_OUT)-metrics" && mkdir -p "$(CHECK_OUT)-metrics"
+	@go run ./cmd/$(BINARY) build -deck-root "$(EXAMPLE_DECK)" \
+		-theme-root "$(EXAMPLE_THEMES)" -out "$(CHECK_OUT)-metrics" -formats html >/dev/null
+	@go run ./cmd/$(BINARY) metrics -dir "$(CHECK_OUT)-metrics" -out "$(METRICS_OUT)"
+	@echo "metrics: wrote $(METRICS_OUT)"
+
+# review is advisory, never a gate: it is a model's opinion on layout metrics,
+# not a measurement, so it must never block a build or a merge the way `check`
+# does. It always exits 0 — a critique that failed to arrive is reported
+# plainly on stdout/stderr, never faked as a pass, but it is still not a
+# reason to fail `make review` itself. Not wired into quality-gates, ci-local,
+# or any CI workflow for the same reason.
+review: ## Extract layout metrics and get a model's advisory critique (never blocking)
+	@$(MAKE) --no-print-directory metrics
+	@if ! command -v uv >/dev/null 2>&1; then \
+		echo "review: uv not found — cannot run ffreis-modelctl; no critique obtained"; \
+		exit 0; \
+	fi; \
+	if [ ! -d "$(MODELCTL_PROJECT)" ]; then \
+		echo "review: $(MODELCTL_PROJECT) not found — no critique obtained"; \
+		exit 0; \
+	fi; \
+	uv run --project "$(MODELCTL_PROJECT)" modelctl run review \
+		--task "Review these rendered-slide layout metrics for a presentation deck. Flag slides that look crowded (high density), inconsistent (font sizes or palette jumping between slides), or sparse, and suggest what to fix." \
+		--file "$(METRICS_OUT)" \
+		--provider deepseek --workspace "$(MODELCTL_WORKSPACE)" \
+		--root "$(MODELCTL_ROOT)" --json \
+	&& echo "review: critique above is advisory only — it never fails the build" \
+	|| echo "review: modelctl did not return a critique (see output above, if any) — no critique obtained, this is not a pass"; \
+	exit 0

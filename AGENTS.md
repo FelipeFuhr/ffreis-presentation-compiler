@@ -296,6 +296,41 @@ approved baseline committed under `examples/golden/`.
   reasonably possible for a 7-slide deck (~670 KB total as of this writing)
   and `examples/` is on the large-files hygiene hook's allowlist.
 
+## Model-assisted review (`metrics`, `review`)
+
+A second, independent review lane over the same rendered deck — advisory,
+and never a gate, unlike `check`.
+
+- **`metrics -dir dist [-out metrics.json]`** extracts per-slide layout
+  metrics from a rendered deck: box geometry (each slide's own direct
+  children, in slide-relative coordinates — not page-relative, since slides
+  are stacked on one scrollable page on screen), text length, bullet count,
+  the distinct rendered font sizes, the distinct text/background colours in
+  use (`palette`), density (text-leaf area ÷ slide area), and image count.
+  This has standalone value independent of `review`: it is the input to any
+  layout review, human or model. The probe lives in its own script,
+  `internal/metrics/metrics.js`, deliberately not folded into `probe.js` —
+  that script is already refactored into one function per check rule and is
+  at its complexity ceiling, and metrics is a different job (reporting
+  numbers, not pass/fail findings).
+- **`make review` runs `metrics`, then hands the JSON to `ffreis-modelctl`**
+  for a text critique:
+  `uv run --project <ffreis-modelctl> modelctl run review --task "…" --file
+  metrics.json --provider deepseek --workspace ws-shared --root <projects
+  root> --json`. `review` is the `modelctl run --list-kinds` kind this uses;
+  it was confirmed to exist rather than assumed.
+- **`ffreis-modelctl` is text-only — no vision support.** That is exactly why
+  this lane reviews layout *metrics* rather than the rendered PNGs. A second
+  lane over the images themselves, with a vision model, is deliberately out
+  of scope here.
+- **`make review` always exits 0.** It prints a model's opinion about layout
+  metrics, which is advice, not a measurement — nothing here should ever
+  block a build or a merge the way `check`'s findings do. When `modelctl` is
+  unavailable or errors, that is printed plainly and the target still exits
+  0, but it never prints a fake success: the output makes it obvious no
+  critique was obtained. `review` is deliberately not wired into
+  `quality-gates`, `ci-local`, or any CI workflow.
+
 ## Live preview (`serve`)
 
 `serve` renders the deck to a temporary directory, serves it over loopback
@@ -416,7 +451,7 @@ go run ./cmd/ffreis-presentation-compiler doctor
 
 make build             # render the example deck (override DECK= THEMES= OUT= FORMATS=)
 make validate-deck     # check the example deck's contract (override DECK= THEMES=)
-make validate-selftest # prove the validator still catches all five rules
+make validate-selftest # prove the validator still catches all six rules
 make smoke-check       # end-to-end render + pagination assertion
 make check             # render the example deck and measure it
 make check-selftest    # prove the checker still catches all eight rules
@@ -425,6 +460,8 @@ make seo-selftest      # prove every required meta tag is emitted
 make seo-audit         # Lighthouse SEO score against the rendered deck
 make golden            # perceptual diff against the approved baseline (examples/golden/)
 make golden-update     # re-render and re-approve the baseline (never run automatically)
+make metrics           # extract per-slide layout metrics as JSON
+make review            # metrics + a model's advisory critique (always exits 0)
 make doctor            # which adapters are available here
 ```
 
@@ -463,6 +500,7 @@ internal/pathsafe/                 the one path-containment helper, shared by th
 internal/render/                   document shell + slide assembly (base.gohtml)
 internal/check/                    measured checks (probe.js)
 internal/golden/                   perceptual PNG diff for visual regression
+internal/metrics/                  per-slide layout metrics for review (metrics.js)
 internal/engine/                   Renderer port, Runner, PDF/PNG/PPTX adapters
 internal/engine/chrome/            CDP client, shared by check + adapters
 internal/engine/pptx/              OOXML writer (assets/ holds the static parts)
@@ -482,8 +520,9 @@ examples/contract-fixture/         deliberately broken deck, for validate-selfte
 
 Implemented: content model, theme + layouts, HTML, PDF, PNG, PPTX (image mode),
 the generator hook, `check` (all eight rules), `validate` (all six rules),
-the SEO surface, `serve`, `doctor`, five self-tests, and golden images
-(`golden`/`golden-update`). Next: model-assisted review.
+the SEO surface, `serve`, `doctor`, five self-tests, golden images
+(`golden`/`golden-update`), and model-assisted review (`metrics`/`review`).
+Next: nothing queued — this list is empty.
 
 ## Keeping this file current
 
