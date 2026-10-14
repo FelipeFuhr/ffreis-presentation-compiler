@@ -85,9 +85,12 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 
 	// Validate before anything renders: a bad field here is a named finding,
 	// not a blank region or a confusing template error three steps downstream.
+	// Advisory findings print and do not stop the build — see contract.Fatal.
 	if findings := contract.Validate(d, th, opts.deckRoot); len(findings) > 0 {
 		_, _ = fmt.Fprint(stderr, contract.Report(findings))
-		return exitError
+		if contract.Fatal(findings) {
+			return exitError
+		}
 	}
 
 	// Beside the contract check, not after the generators: neither reads
