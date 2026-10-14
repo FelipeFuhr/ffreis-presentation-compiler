@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/check"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/contract"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/deck"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine"
@@ -136,11 +137,35 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	job := engine.Job{IndexPath: index, OutDir: opts.out, Slug: opts.slug, Size: size}
-	if err := renderFormats(context.Background(), formats, job, speakerNotes(d), stdout); err != nil {
+	paths, err := renderFormats(context.Background(), formats, job, speakerNotes(d), stdout)
+	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
 		return exitError
 	}
+
+	// A silently dropped or doubled PDF page is invisible until someone
+	// presents, so the common path checks for it without anyone needing to
+	// remember a flag — whenever this build actually produced a PDF.
+	finding, err := checkPDFPageCount(paths, len(d.Slides))
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
+		return exitError
+	}
+	if finding != nil {
+		_, _ = fmt.Fprintf(stderr, "build: %s\n", finding.Detail)
+		return exitError
+	}
 	return exitOK
+}
+
+// checkPDFPageCount compares a produced PDF's page count against slideCount.
+// It is a no-op, returning (nil, nil), when no PDF was produced.
+func checkPDFPageCount(paths map[engine.Format]string, slideCount int) (*check.Finding, error) {
+	pdfPath, ok := paths[engine.FormatPDF]
+	if !ok {
+		return nil, nil
+	}
+	return check.ComparePDFPages(pdfPath, slideCount)
 }
 
 // reportSEO prints SEO findings and decides whether they are fatal.
@@ -205,26 +230,39 @@ func speakerNotes(d *deck.Deck) map[int]string {
 	return notes
 }
 
-func renderFormats(ctx context.Context, formats []engine.Format, job engine.Job, notes map[int]string, stdout io.Writer) error {
+// renderFormats runs each requested adapter, printing the artifact path it
+// produced, and returns the absolute path it wrote for each format. A
+// failing adapter aborts the build rather than leaving a partial set of
+// artifacts that looks complete.
+func renderFormats(ctx context.Context, formats []engine.Format, job engine.Job, notes map[int]string, stdout io.Writer) (map[engine.Format]string, error) {
+	paths := make(map[engine.Format]string, len(formats))
 	for _, f := range formats {
 		r, err := rendererFor(f, notes)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		path, err := r.Render(ctx, job)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		abs, err := filepath.Abs(path)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		_, _ = fmt.Fprintln(stdout, abs)
+		paths[f] = abs
 	}
-	return nil
+	return paths, nil
 }
 
-func rendererFor(f engine.Format, notes map[int]string) (engine.Renderer, error) {
+// rendererFor is a variable, not a plain function, for the same reason
+// engine.LookPath is: it is the one boundary in this file that needs a browser.
+// Stubbing it lets a test drive `build` all the way through the pdf-pages
+// comparison — the rule whose entire purpose is to notice a PDF that paginated
+// wrong — without a real Chrome deciding whether the test passes.
+var rendererFor = defaultRendererFor
+
+func defaultRendererFor(f engine.Format, notes map[int]string) (engine.Renderer, error) {
 	switch f {
 	case engine.FormatPDF:
 		return engine.NewPDFRenderer(), nil

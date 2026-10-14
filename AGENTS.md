@@ -207,7 +207,7 @@ baked into a public, consumer-agnostic compiler, which is exactly what the
 `check` measures a **rendered** deck over CDP — it reads `dist/index.html`
 rather than re-rendering, so what ships is what gets measured. Rules:
 `overflow`, `out-of-bounds`, `tiny-type`, `contrast` (WCAG AA), `missing-asset`,
-`font-fallback`.
+`font-fallback`, `overlap`, `pdf-pages`.
 
 These are measurements, not opinions. On its first run against a real deck it
 found three clipping bugs in slides that had already been eyeballed and passed,
@@ -222,8 +222,42 @@ two of them significant (32px and 60px of content silently cut).
   so almost every box has a fractional pixel height and a stack of them
   accumulates 1–3px nobody can see. Raise it only with evidence, never to make a
   deck pass.
+- **`overlap` is a pairwise area check, not a class list.** It was the one rule
+  deferred for being the most false-positive-prone of the set (see Roadmap
+  history), so the policy it landed with is worth being explicit about:
+  - Only **leaf text blocks** are compared — elements whose own `ownText` is
+    non-empty, the same primitive `tiny-type`/`contrast` already use. A
+    container is never blamed for its children.
+  - Ancestor/descendant pairs are skipped via `.contains()` — they always
+    intersect by construction, so comparing them would be pure noise.
+  - The policy for chrome that sits over the body **by design** (the slide
+    badge, the phase pill) is structural, not a hardcoded class list:
+    elements are compared only when both are in **normal flow**
+    (`position: static` or `relative`). Anything absolutely or
+    fixed-positioned is excluded outright. `data-overlap-ignore` is the
+    theme-declared escape hatch for anything else that legitimately overlaps
+    — the same pattern as `data-measure` / `data-slide` — set it on the
+    element, not a selector list in Go.
+  - A **real area of overlap** is required
+    (`-overlap-min-area-px`, default `64`, see `check.DefaultOverlapMinAreaPx`)
+    so two inline siblings sharing a line do not fire on a touching edge or a
+    sub-pixel rounding sliver.
+  - The comparison is `O(n^2)` over one slide's text leaves — intentionally;
+    that is fine at slide scale, so do not "optimise" it into something that
+    skips a real collision. A slide with an implausible number of leaves
+    (`MAX_OVERLAP_LEAVES` in `probe.js`) skips the comparison outright instead
+    of hanging the check.
+- **`pdf-pages` is Go, not DOM.** A silently dropped or doubled PDF page is
+  invisible until someone presents, and PDF page count is not something CDP
+  measures. `check -pdf <file>` counts pages by scanning for `/Type /Page`
+  object dictionaries directly in the PDF bytes — deliberately not shelling
+  out to `pdfinfo`, so the check still works where poppler is not installed.
+  **The trap is `/Type /Pages`** (the page-tree node): a naive scan without a
+  trailing word boundary overcounts by at least one on every real PDF.
+  `build` runs this comparison automatically whenever `-formats` produced a
+  PDF, so the common path is covered without anyone remembering the flag.
 - `make check-selftest` renders `examples/check-fixture` — a deliberately broken
-  deck and theme — and fails unless **all six rules fire**. Without it a checker
+  deck and theme — and fails unless **all eight rules fire**. Without it a checker
   that silently stopped working would look exactly like a clean deck.
 
 ## Live preview (`serve`)
@@ -336,7 +370,7 @@ make validate-deck     # check the example deck's contract (override DECK= THEME
 make validate-selftest # prove the validator still catches all five rules
 make smoke-check       # end-to-end render + pagination assertion
 make check             # render the example deck and measure it
-make check-selftest    # prove the checker still catches all six rules
+make check-selftest    # prove the checker still catches all eight rules
 make export-selftest   # prove the generated pptx actually opens
 make seo-selftest      # prove every required meta tag is emitted
 make seo-audit         # Lighthouse SEO score against the rendered deck
@@ -394,13 +428,8 @@ examples/contract-fixture/         deliberately broken deck, for validate-selfte
 ## Roadmap
 
 Implemented: content model, theme + layouts, HTML, PDF, PNG, PPTX (image mode),
-the generator hook, `check`, `serve` (live-reload preview), `doctor`, and three
-self-tests. Next, in order: an explicit contract file for deck.yaml; an
-`overlap` rule (deferred — parent/child and absolutely-positioned chrome make
-it the most false-positive-prone of the set); model-assisted review.
-the generator hook, `check`, `validate`, `doctor`, and four self-tests. Next,
-in order: an `overlap` rule (deferred — parent/child and absolutely-positioned
-chrome make it the most false-positive-prone of the set); `serve --watch`;
+the generator hook, `check` (all eight rules), `validate`, the SEO surface,
+`serve`, `doctor`, and five self-tests. Next, in order: golden images;
 model-assisted review.
 
 ## Keeping this file current

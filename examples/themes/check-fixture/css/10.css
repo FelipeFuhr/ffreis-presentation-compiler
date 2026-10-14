@@ -29,3 +29,18 @@
 
 /* Pushed past the right edge: triggers `out-of-bounds`. */
 .escapes { position: absolute; left: 13in; top: 1in; }
+
+/* Two normal-flow blocks, nudged onto the same region with a transform
+   rather than position:absolute, so the overlap they produce is the kind
+   the rule is meant to catch (a diagram label on a label or an arrow) and
+   not the badge/phase-pill kind the rule deliberately ignores. Triggers
+   `overlap`. */
+.overlap-a,
+.overlap-b {
+  position: relative;
+  height: 0.5in;
+  line-height: 0.5in;
+  margin: 0;
+  font-size: 14px;
+}
+.overlap-b { transform: translateY(-0.5in); }

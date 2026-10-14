@@ -32,7 +32,7 @@ func (f *fakeBrowser) Eval(_ context.Context, _, script string, out any) error {
 
 func TestRunInjectsThresholdsIntoTheProbe(t *testing.T) {
 	b := &fakeBrowser{}
-	opts := check.Options{MinFontPx: 9, TolerancePx: 4, Fonts: []string{"Roboto"}}
+	opts := check.Options{MinFontPx: 9, TolerancePx: 4, OverlapMinAreaPx: 100, Fonts: []string{"Roboto"}}
 
 	if _, err := check.Run(context.Background(), b, "file:///deck/index.html", opts); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -40,12 +40,14 @@ func TestRunInjectsThresholdsIntoTheProbe(t *testing.T) {
 
 	// The placeholders must be substituted; a leftover one would be a
 	// JavaScript syntax error at evaluation time.
-	for _, placeholder := range []string{"__MIN_FONT_PX__", "__TOL_PX__", "__FONTS__"} {
+	for _, placeholder := range []string{"__MIN_FONT_PX__", "__TOL_PX__", "__OVERLAP_MIN_AREA_PX__", "__FONTS__"} {
 		if strings.Contains(b.script, placeholder) {
 			t.Errorf("probe still contains the placeholder %s", placeholder)
 		}
 	}
-	for _, want := range []string{"const TOL = 4;", "const MIN_FONT_PX = 9;", `["Roboto"]`} {
+	for _, want := range []string{
+		"const TOL = 4;", "const MIN_FONT_PX = 9;", "const OVERLAP_MIN_AREA_PX = 100;", `["Roboto"]`,
+	} {
 		if !strings.Contains(b.script, want) {
 			t.Errorf("probe is missing %q", want)
 		}
@@ -62,6 +64,9 @@ func TestRunAppliesDefaults(t *testing.T) {
 	}
 	if !strings.Contains(b.script, "const MIN_FONT_PX = 11;") {
 		t.Error("default minimum font size was not applied")
+	}
+	if !strings.Contains(b.script, "const OVERLAP_MIN_AREA_PX = 64;") {
+		t.Error("default overlap minimum area was not applied")
 	}
 	// A nil font list must still produce valid JS.
 	if !strings.Contains(b.script, "const FONTS = null;") {

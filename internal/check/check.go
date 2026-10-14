@@ -33,6 +33,14 @@ const DefaultMinFontPx = 11.0
 // 60px. Raise this only with evidence, never to make a deck pass.
 const DefaultTolerancePx = 2.5
 
+// DefaultOverlapMinAreaPx is the smallest intersecting area, in CSS px^2,
+// treated as a real collision rather than two adjacent inline boxes touching
+// at a rounded edge. Roughly an 8x8px patch: comfortably above the sub-pixel
+// sliver two siblings on the same line can share, comfortably below the area
+// a label actually sitting on another label or an arrow produces. Lower this
+// only with evidence from a real false negative, never to silence a finding.
+const DefaultOverlapMinAreaPx = 64.0
+
 // Finding is one measured problem.
 type Finding struct {
 	Slide   int    `json:"slide"`
@@ -52,6 +60,9 @@ type Options struct {
 	MinFontPx float64
 	// TolerancePx is the overflow below which a finding is rounding noise.
 	TolerancePx float64
+	// OverlapMinAreaPx is the intersecting area below which two text blocks
+	// are a touching edge, not a collision. See DefaultOverlapMinAreaPx.
+	OverlapMinAreaPx float64
 	// Fonts the theme expects; a substituted face is reported.
 	Fonts []string
 }
@@ -67,6 +78,10 @@ func Run(ctx context.Context, b Browser, pageURL string, opts Options) ([]Findin
 	if tolerance <= 0 {
 		tolerance = DefaultTolerancePx
 	}
+	overlapMinArea := opts.OverlapMinAreaPx
+	if overlapMinArea <= 0 {
+		overlapMinArea = DefaultOverlapMinAreaPx
+	}
 	fonts, err := json.Marshal(opts.Fonts)
 	if err != nil {
 		return nil, fmt.Errorf("encode fonts: %w", err)
@@ -75,6 +90,7 @@ func Run(ctx context.Context, b Browser, pageURL string, opts Options) ([]Findin
 	script := strings.NewReplacer(
 		"__MIN_FONT_PX__", strconv.FormatFloat(minFont, 'f', -1, 64),
 		"__TOL_PX__", strconv.FormatFloat(tolerance, 'f', -1, 64),
+		"__OVERLAP_MIN_AREA_PX__", strconv.FormatFloat(overlapMinArea, 'f', -1, 64),
 		"__FONTS__", string(fonts),
 	).Replace(probeJS)
 
@@ -83,13 +99,20 @@ func Run(ctx context.Context, b Browser, pageURL string, opts Options) ([]Findin
 		return nil, fmt.Errorf("evaluate checks: %w", err)
 	}
 
+	SortFindings(findings)
+	return findings, nil
+}
+
+// SortFindings orders findings by slide then rule in place, so output is
+// stable regardless of how many sources fed into the slice — the probe and,
+// for pdf-pages, a second comparison the CLI appends after Run returns.
+func SortFindings(findings []Finding) {
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Slide != findings[j].Slide {
 			return findings[i].Slide < findings[j].Slide
 		}
 		return findings[i].Rule < findings[j].Rule
 	})
-	return findings, nil
 }
 
 // Report renders findings as a human-readable summary.
