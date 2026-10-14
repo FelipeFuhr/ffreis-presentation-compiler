@@ -40,7 +40,9 @@ MUTATION_THRESHOLD ?= 60
 
 	ci-list install-act ci-local \
 	init-github \
-	install build doctor smoke-check check check-selftest export-selftest
+	install build doctor smoke-check check check-selftest export-selftest \
+	validate-deck validate-selftest \
+	seo-selftest seo-audit
 
 ## mutation: run mutation testing with gremlins (slow — CI only)
 mutation:
@@ -162,6 +164,7 @@ init-github: ## Apply standard fleet settings to the GitHub repo (SHA-pinning, s
 BINARY      ?= ffreis-presentation-compiler
 EXAMPLE_DECK   ?= examples/sample-deck
 EXAMPLE_THEMES ?= examples/themes
+CONTRACT_FIXTURE ?= examples/contract-fixture
 SMOKE_OUT   ?= .bin/smoke
 
 install: ## Install the CLI into GOBIN
@@ -229,6 +232,24 @@ check-selftest: ## Prove the checker is not vacuous: the broken fixture must fai
 	fi; \
 	echo "check-selftest: ok — all 8 rules fired on the broken fixture"
 
+validate-deck: ## Validate a deck's contract before build (override DECK= THEMES=)
+	@go run ./cmd/$(BINARY) validate \
+		-deck-root "$(or $(DECK),$(EXAMPLE_DECK))" \
+		-theme-root "$(or $(THEMES),$(EXAMPLE_THEMES))"
+
+validate-selftest: ## Prove the validator is not vacuous: the broken fixture must fail every rule
+	@out=$$(go run ./cmd/$(BINARY) validate -deck-root "$(CONTRACT_FIXTURE)" \
+		-theme-root "$(EXAMPLE_THEMES)" 2>&1 || true); \
+	missing=""; \
+	for rule in unknown-layout missing-field unknown-field missing-asset unsafe-path; do \
+		echo "$$out" | grep -q "$$rule" || missing="$$missing $$rule"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "validate-selftest: the fixture did not trigger:$$missing" >&2; \
+		echo "$$out" >&2; exit 1; \
+	fi; \
+	echo "validate-selftest: ok — all 5 rules fired on the broken fixture"
+
 export-selftest: ## Prove the PPTX actually opens: round-trip it through LibreOffice
 	@command -v soffice >/dev/null 2>&1 || { echo "export-selftest: soffice not installed — skipping" >&2; exit 0; }
 	@rm -rf "$(CHECK_OUT)-export" && mkdir -p "$(CHECK_OUT)-export"
@@ -248,3 +269,74 @@ export-selftest: ## Prove the PPTX actually opens: round-trip it through LibreOf
 	else \
 		echo "export-selftest: ok — pptx opens"; \
 	fi
+
+# ── SEO ──────────────────────────────────────────────────────────────────────
+SEO_OUT ?= .bin/seo
+SEO_PORT ?= 8731
+# Pinned, not "latest": a Lighthouse minor can move an audit between categories
+# and turn a green gate red with no change to the deck. The fleet's websites
+# gate on categories:seo at 0.9, so a deck held to the same floor is comparable.
+LIGHTHOUSE_VERSION ?= 12.2.1
+LIGHTHOUSE_SEO_MIN ?= 0.9
+
+seo-selftest: ## Prove the SEO emitter is not vacuous: every required tag must be present
+	@set -euo pipefail; \
+	rm -rf "$(SEO_OUT)" && mkdir -p "$(SEO_OUT)"; \
+	go run ./cmd/$(BINARY) build -deck-root "$(EXAMPLE_DECK)" \
+		-theme-root "$(EXAMPLE_THEMES)" -out "$(SEO_OUT)" -formats html >/dev/null; \
+	index="$(SEO_OUT)/index.html"; \
+	missing=""; \
+	for tag in 'name="robots"' 'name="description"' 'name="author"' \
+	           'rel="canonical"' 'property="og:locale"' 'property="og:type"' \
+	           'property="og:title"' 'property="og:description"' \
+	           'property="og:url"' 'property="og:image"' \
+	           'property="og:image:alt"' 'property="og:site_name"' \
+	           'name="twitter:card"' 'name="twitter:title"' \
+	           'name="twitter:description"' 'name="twitter:image"' \
+	           'application/ld+json'; do \
+		grep -qF -- "$$tag" "$$index" || missing="$$missing $$tag"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "seo-selftest: the rendered deck is missing:$$missing" >&2; exit 1; \
+	fi; \
+	for f in sitemap.xml robots.txt; do \
+		test -s "$(SEO_OUT)/$$f" || { echo "seo-selftest: no $$f" >&2; exit 1; }; \
+	done; \
+	grep -qF 'Sitemap: ' "$(SEO_OUT)/robots.txt" || \
+		{ echo "seo-selftest: robots.txt omits the Sitemap directive" >&2; exit 1; }; \
+	python3 -c 'import json,re,sys; \
+h=open("$(SEO_OUT)/index.html",encoding="utf-8").read(); \
+b=re.search(r"<script type=\"application/ld\+json\">(.*?)</script>",h,re.S); \
+sys.exit("seo-selftest: no ld+json block") if not b else None; \
+d=json.loads(b.group(1)); \
+sys.exit("seo-selftest: ld+json @type is %r" % d.get("@type")) \
+  if d.get("@type")!="PresentationDigitalDocument" else None; \
+print("seo-selftest: ok — 17 tags, sitemap, robots, and ld+json parses as %s" % d["@type"])'
+
+seo-audit: ## Audit the rendered deck with Lighthouse (SEO category, floor $(LIGHTHOUSE_SEO_MIN))
+	@command -v npx >/dev/null 2>&1 || { \
+		echo "seo-audit: npx not found — install Node to run the Lighthouse audit." >&2; \
+		echo "seo-audit: 'make seo-selftest' covers the emitted vocabulary without Node." >&2; \
+		exit 1; }
+	@set -euo pipefail; \
+	$(MAKE) --no-print-directory seo-selftest >/dev/null; \
+	python3 -m http.server "$(SEO_PORT)" --bind 127.0.0.1 --directory "$(SEO_OUT)" >/dev/null 2>&1 & \
+	server=$$!; \
+	trap 'kill "$$server" 2>/dev/null || true' EXIT; \
+	for _ in $$(seq 1 40); do \
+		curl -fsS "http://127.0.0.1:$(SEO_PORT)/" >/dev/null 2>&1 && break; \
+		sleep 0.25; \
+	done; \
+	curl -fsS "http://127.0.0.1:$(SEO_PORT)/" >/dev/null || \
+		{ echo "seo-audit: the local server never came up on $(SEO_PORT)" >&2; exit 1; }; \
+	npx --yes lighthouse@$(LIGHTHOUSE_VERSION) "http://127.0.0.1:$(SEO_PORT)/" \
+		--only-categories=seo --output=json --output-path="$(SEO_OUT)/lighthouse.json" \
+		--chrome-flags="--headless=new --no-sandbox --disable-dev-shm-usage" \
+		--quiet >/dev/null; \
+	python3 -c 'import json,sys; \
+r=json.load(open("$(SEO_OUT)/lighthouse.json",encoding="utf-8")); \
+score=r["categories"]["seo"]["score"]; \
+failed=[a["id"] for a in r["audits"].values() if a.get("score") == 0]; \
+print("seo-audit: score %.2f (floor $(LIGHTHOUSE_SEO_MIN))" % score); \
+[print("  failed: %s" % f) for f in failed]; \
+sys.exit(0 if score >= $(LIGHTHOUSE_SEO_MIN) else "seo-audit: below the floor")'

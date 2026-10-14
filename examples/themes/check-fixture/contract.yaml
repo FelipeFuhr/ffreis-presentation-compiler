@@ -1,0 +1,14 @@
+# check-fixture's one layout ("broken") exists to trip every `check` rule at
+# render time, not to exercise `validate` — so its own contract just has to
+# let the fixture deck through, not be interesting.
+layouts:
+  broken:
+    required: [items]
+    allowed: []
+  # The overlap fixture takes no fields — its collision is pure CSS. Listed
+  # anyway: an undeclared layout emits an `undescribed-layout` advisory on
+  # every run of the self-tests, and a shipped fixture that prints a warning
+  # is how people learn to ignore warnings.
+  overlap:
+    required: []
+    allowed: []

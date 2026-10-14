@@ -32,9 +32,9 @@ const manifest = `
 title: Deck Title
 subtitle: A subtitle
 client: Some Client
-theme: flemming
+theme: brand
 aspect: "16:9"
-footer: Flemming
+footer: Some Client · Q3
 `
 
 func TestLoadReadsManifestAndSlidesInFilenameOrder(t *testing.T) {
@@ -48,7 +48,7 @@ func TestLoadReadsManifestAndSlidesInFilenameOrder(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if d.Title != "Deck Title" || d.Client != "Some Client" || d.Theme != "flemming" {
+	if d.Title != "Deck Title" || d.Client != "Some Client" || d.Theme != "brand" {
 		t.Errorf("manifest not parsed: %+v", d)
 	}
 	if len(d.Slides) != 2 {

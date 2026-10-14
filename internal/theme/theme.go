@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/pathsafe"
 )
 
 const (
@@ -43,7 +45,15 @@ func Load(root, name string) (*Theme, error) {
 	if name == "" {
 		return nil, fmt.Errorf("deck.yaml does not name a theme")
 	}
-	dir := filepath.Join(root, name)
+	// A theme name is a single directory component, never a path: reject a
+	// separator or ".." outright rather than let it reach the join below.
+	if name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
+		return nil, fmt.Errorf("theme %q is not a valid theme name: it must be a single directory name, not a path", name)
+	}
+	dir, err := pathsafe.Contain(root, name)
+	if err != nil {
+		return nil, fmt.Errorf("theme %q: %w", name, err)
+	}
 	info, err := os.Stat(dir)
 	if err != nil {
 		return nil, fmt.Errorf("theme %q: %w", name, err)

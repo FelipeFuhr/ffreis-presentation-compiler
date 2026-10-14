@@ -8,6 +8,8 @@ package deck
 import (
 	"fmt"
 	"html/template"
+
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/seo"
 )
 
 // Aspect ratios the compiler knows how to page.
@@ -15,6 +17,14 @@ const (
 	AspectWide     = "16:9"
 	AspectStandard = "4:3"
 )
+
+// DefaultLang is the last resort when neither the deck nor the caller names a
+// language. It has to be something — `<html lang>` and schema.org's
+// inLanguage both want a value, and omitting it tells a screen reader to guess
+// — but a public, consumer-agnostic compiler must not default to any one
+// consumer's language. "en" is the neutral choice, and a deck that is not in
+// English says so in its own deck.yaml rather than at every call site.
+const DefaultLang = "en"
 
 // Size is a slide's physical size in inches. Inches (not pixels) because the
 // same number has to satisfy CSS `@page { size: … }` and the PDF print path.
@@ -32,7 +42,37 @@ type Deck struct {
 	Aspect   string `yaml:"aspect"`
 	Footer   string `yaml:"footer"`
 
+	// Lang is the deck's BCP 47 language tag. It belongs to the content, not
+	// to the invocation, so it lives here; the CLI's -lang flag overrides it.
+	Lang string `yaml:"lang"`
+
+	// SEO is the discovery surface for a deck served over HTTP. Omitting the
+	// block entirely is the normal case and keeps the deck noindex.
+	SEO seo.Meta `yaml:"seo"`
+
 	Slides []Slide `yaml:"-"`
+}
+
+// Language resolves the document language: an explicit override wins, then the
+// deck's own declaration, then DefaultLang.
+func (d *Deck) Language(override string) string {
+	for _, candidate := range []string{override, d.Lang, DefaultLang} {
+		if candidate != "" {
+			return candidate
+		}
+	}
+	return DefaultLang
+}
+
+// Document summarises the deck for the SEO emitter, which is a leaf package
+// and so cannot be handed a *Deck.
+func (d *Deck) Document(lang string) seo.Document {
+	return seo.Document{
+		Title:    d.Title,
+		Subtitle: d.Subtitle,
+		Lang:     d.Language(lang),
+		Slides:   len(d.Slides),
+	}
 }
 
 // Slide is one rendered page.
