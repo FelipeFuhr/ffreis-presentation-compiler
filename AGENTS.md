@@ -260,6 +260,88 @@ two of them significant (32px and 60px of content silently cut).
   deck and theme — and fails unless **all eight rules fire**. Without it a checker
   that silently stopped working would look exactly like a clean deck.
 
+## Golden images (`golden`, `internal/golden/`)
+
+Visual regression for the shipped example deck. Nothing else in this fleet
+owns visual regression today, so this is new, deliberately minimal ground:
+render `examples/sample-deck` to PNG (one image per slide, at 2x — the PNG
+adapter `internal/engine` already ships) and compare each slide against an
+approved baseline under `examples/golden/`.
+
+> **The baselines are NOT committed yet, so `make golden` errors until you
+> run `make golden-update` once.** It fails loudly rather than passing
+> vacuously, and nothing gates on it, so this is a seeded-capability gap
+> rather than a broken build. The blocker is the shared
+> `hygiene-binary-files` pre-commit hook, which rejects every binary with no
+> allowlist (`platform/ffreis-platform-standards/lefthook/scripts/check_binary_files.sh`),
+> and this repo has never committed a binary file. Until that hook grows an
+> opt-in allowlist **upstream**, visual regression here is local-only — the
+> code is complete and tested, but it cannot catch drift for anyone who has
+> not seeded their own baseline, which is most of the point. Do not widen the
+> hook from a consumer repo.
+
+- **The comparison is perceptual, not byte-exact.** Chrome's PNG encoder is
+  not byte-reproducible across versions — subpixel rounding and anti-aliasing
+  shift by a few intensity levels per channel on every release — so a byte
+  compare would fail on every Chrome update and teach everyone to re-approve
+  the baseline without looking. `internal/golden` decodes both images and
+  counts pixels whose combined channel difference exceeds
+  `golden.PixelDiffThreshold`; a slide fails when that count, as a fraction of
+  its total pixels, exceeds `golden.DefaultDiffRatioTolerance` (1%). Only the
+  standard library (`image`, `image/png`) is used — no new dependency for a
+  diff this simple.
+- **A dimension mismatch is a hard failure, not a 100% diff.** Two
+  different-shaped images have no pixel ratio to compute, so `golden` reports
+  the slide and both sizes directly (`SlideResult.DimensionsMatch`) instead of
+  fabricating a number.
+- **`make golden` and `make golden-update` are deliberately separate, and
+  `golden-update` is a plain `cp` in the Makefile, not a Go code path at
+  all.** The `golden` CLI subcommand has no flag that can write to
+  `-baseline`; nothing short of running `make golden-update` by name can ever
+  re-approve it, so a typo in a compare invocation can never turn into a
+  silent re-approval.
+- **A failing slide writes a highlight artifact under `.bin/golden/`**
+  (`<slide>.diff.png`: differing pixels in red, everything else dimmed to
+  grey) and names the path in its own output line, so a human has somewhere
+  to look without being told a bespoke path.
+- Baselines are binary files in a Go repo, so they are kept as small as
+  reasonably possible for a 7-slide deck (~670 KB total as of this writing).
+
+## Model-assisted review (`metrics`, `review`)
+
+A second, independent review lane over the same rendered deck — advisory,
+and never a gate, unlike `check`.
+
+- **`metrics -dir dist [-out metrics.json]`** extracts per-slide layout
+  metrics from a rendered deck: box geometry (each slide's own direct
+  children, in slide-relative coordinates — not page-relative, since slides
+  are stacked on one scrollable page on screen), text length, bullet count,
+  the distinct rendered font sizes, the distinct text/background colours in
+  use (`palette`), density (text-leaf area ÷ slide area), and image count.
+  This has standalone value independent of `review`: it is the input to any
+  layout review, human or model. The probe lives in its own script,
+  `internal/metrics/metrics.js`, deliberately not folded into `probe.js` —
+  that script is already refactored into one function per check rule and is
+  at its complexity ceiling, and metrics is a different job (reporting
+  numbers, not pass/fail findings).
+- **`make review` runs `metrics`, then hands the JSON to `ffreis-modelctl`**
+  for a text critique:
+  `uv run --project <ffreis-modelctl> modelctl run review --task "…" --file
+  metrics.json --provider deepseek --workspace ws-shared --root <projects
+  root> --json`. `review` is the `modelctl run --list-kinds` kind this uses;
+  it was confirmed to exist rather than assumed.
+- **`ffreis-modelctl` is text-only — no vision support.** That is exactly why
+  this lane reviews layout *metrics* rather than the rendered PNG files. A second
+  lane over the images themselves, with a vision model, is deliberately out
+  of scope here.
+- **`make review` always exits 0.** It prints a model's opinion about layout
+  metrics, which is advice, not a measurement — nothing here should ever
+  block a build or a merge the way `check`'s findings do. When `modelctl` is
+  unavailable or errors, that is printed plainly and the target still exits
+  0, but it never prints a fake success: the output makes it obvious no
+  critique was obtained. `review` is deliberately not wired into
+  `quality-gates`, `ci-local`, or any CI workflow.
+
 ## Live preview (`serve`)
 
 `serve` renders the deck to a temporary directory, serves it over loopback
@@ -311,7 +393,20 @@ Fatal rules: `unknown-layout`, `missing-field`, `unknown-field`,
 `missing-asset` (a `media`, or a chart/diagram `spec`/`data`, that does not
 exist on disk), `unsafe-path`, `invalid-field` (a malformed chart/diagram
 block, or an asset field that is not a non-empty string),
-`invalid-contract` (a theme's own `contract.yaml` fails to parse).
+`invalid-contract` (a theme's own `contract.yaml` fails to parse), `row-arity`
+(a `rows` list whose row lengths disagree with `columns`).
+
+**`row-arity` exists because a well-formed-looking table can still be wrong.**
+YAML splits a flow sequence on every top-level comma, so a decimal written
+with a comma — `9,8 milhões`, the Portuguese convention — inside an unquoted
+table cell silently becomes two cells, and every value after it in that row
+lands under the wrong header. The rendered table still fits the slide and
+reads as plausible numbers, so none of `check`'s measurements (overflow,
+contrast, tiny-type…) ever see a problem; only an arity check catches it.
+Quote any cell value that might contain a comma. The rule only looks at a
+`rows` element when it is itself a list — a layout that shapes rows as maps
+(one row per `{name, price, benefits}`, say) has no cell count to compare
+against `columns`, so it is skipped rather than flagged.
 
 **`undescribed-layout` is the one advisory rule, and the split matters.**
 Whether a layout exists is the *theme's* answer — `theme.LayoutNames()` —
@@ -350,7 +445,7 @@ path separator at all — it names a single subdirectory, never a path — which
 
 `make validate-selftest` renders `examples/contract-fixture` — a
 deliberately broken deck against the sample theme — and fails unless **all
-five rules fire**. Without it a validator that silently stopped catching one
+six rules fire**. Without it a validator that silently stopped catching one
 of them would look exactly like a clean deck.
 
 ## Commands
@@ -367,13 +462,17 @@ go run ./cmd/ffreis-presentation-compiler doctor
 
 make build             # render the example deck (override DECK= THEMES= OUT= FORMATS=)
 make validate-deck     # check the example deck's contract (override DECK= THEMES=)
-make validate-selftest # prove the validator still catches all five rules
+make validate-selftest # prove the validator still catches all six rules
 make smoke-check       # end-to-end render + pagination assertion
 make check             # render the example deck and measure it
 make check-selftest    # prove the checker still catches all eight rules
 make export-selftest   # prove the generated pptx actually opens
 make seo-selftest      # prove every required meta tag is emitted
 make seo-audit         # Lighthouse SEO score against the rendered deck
+make golden            # perceptual diff against the approved baseline (examples/golden/)
+make golden-update     # re-render and re-approve the baseline (never run automatically)
+make metrics           # extract per-slide layout metrics as JSON
+make review            # metrics + a model's advisory critique (always exits 0)
 make doctor            # which adapters are available here
 ```
 
@@ -411,6 +510,8 @@ internal/contract/                 field-vocabulary validation (contract.yaml)
 internal/pathsafe/                 the one path-containment helper, shared by theme/gen/contract
 internal/render/                   document shell + slide assembly (base.gohtml)
 internal/check/                    measured checks (probe.js)
+internal/golden/                   perceptual PNG diff for visual regression
+internal/metrics/                  per-slide layout metrics for review (metrics.js)
 internal/engine/                   Renderer port, Runner, PDF/PNG/PPTX adapters
 internal/engine/chrome/            CDP client, shared by check + adapters
 internal/engine/pptx/              OOXML writer (assets/ holds the static parts)
@@ -419,6 +520,7 @@ internal/serve/                    live-reload preview: render/watch/HTTP loop
 internal/seo/                      head meta, schema.org, sitemap, robots (leaf)
 internal/logx/                     slog construction
 examples/sample-deck/              brand-free fixture deck
+examples/golden/                   approved baseline PNG files for `make golden`
 examples/themes/sample/            brand-free fixture theme
 examples/check-fixture/            deliberately broken deck, for check-selftest
 examples/themes/check-fixture/     deliberately broken theme, ditto
@@ -428,9 +530,10 @@ examples/contract-fixture/         deliberately broken deck, for validate-selfte
 ## Roadmap
 
 Implemented: content model, theme + layouts, HTML, PDF, PNG, PPTX (image mode),
-the generator hook, `check` (all eight rules), `validate`, the SEO surface,
-`serve`, `doctor`, and five self-tests. Next, in order: golden images;
-model-assisted review.
+the generator hook, `check` (all eight rules), `validate` (all six rules),
+the SEO surface, `serve`, `doctor`, five self-tests, golden images
+(`golden`/`golden-update`), and model-assisted review (`metrics`/`review`).
+Next: nothing queued — this list is empty.
 
 ## Keeping this file current
 

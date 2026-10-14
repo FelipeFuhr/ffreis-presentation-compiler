@@ -5,3 +5,9 @@ coverage.out
 
 # Binary produced by a bare `go build ./...` in the repo root.
 /ffreis-presentation-compiler
+
+# `make review` shells out to `uv run --project <ffreis-modelctl>`, which
+# creates both of these in the current directory: a venv symlink (uv's own
+# convention) and modelctl's own raw-reply run directory.
+.venv
+.modelctl/

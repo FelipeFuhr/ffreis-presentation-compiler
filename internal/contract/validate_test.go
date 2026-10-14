@@ -358,3 +358,45 @@ func TestValidateStillFailsAFatalFindingAlongsideAnAdvisory(t *testing.T) {
 		t.Errorf("a missing required field stopped being fatal:\n%s", contract.Report(findings))
 	}
 }
+
+// rowArityDetail validates a one-row table and returns the row-arity finding's
+// detail text, so the wording test below reads as assertions rather than as a
+// search loop.
+func rowArityDetail(t *testing.T, th *theme.Theme, row []any) string {
+	t.Helper()
+	d := &deck.Deck{Slides: []deck.Slide{{
+		Number: 1, Source: "s.md", Layout: "table",
+		Fields: map[string]any{"columns": []any{"A", "B"}, "rows": []any{row}},
+	}}}
+	for _, f := range contract.Validate(d, th, t.TempDir()) {
+		if f.Rule == contract.RuleRowArity {
+			return f.Detail
+		}
+	}
+	t.Fatalf("no row-arity finding for %v", row)
+	return ""
+}
+
+// TestRowArityDetailIsGrammatical guards the wording of a report an author
+// reads when their table is malformed. "1 cells" undercuts the message, and
+// the comma cause belongs only on the extra-cells case — too few cells has a
+// different cause entirely.
+func TestRowArityDetailIsGrammatical(t *testing.T) {
+	th := themeWithExtraLayout(t, "unused")
+
+	singular := rowArityDetail(t, th, []any{"a"})
+	if !strings.Contains(singular, "has 1 cell but") {
+		t.Errorf("detail %q does not say \"has 1 cell but\"", singular)
+	}
+	if strings.Contains(singular, "comma") {
+		t.Errorf("a too-few-cells detail blames a comma: %q", singular)
+	}
+
+	plural := rowArityDetail(t, th, []any{"a", "b", "c"})
+	if !strings.Contains(plural, "has 3 cells but") {
+		t.Errorf("detail %q does not say \"has 3 cells but\"", plural)
+	}
+	if !strings.Contains(plural, "comma") {
+		t.Errorf("an extra-cells detail does not name the comma cause: %q", plural)
+	}
+}
