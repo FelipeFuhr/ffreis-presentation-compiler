@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 400" role="img"
+     aria-label="Throughput by quarter, rising from 9,800 to 12,400 units per week">
+  <rect width="640" height="400" fill="#ffffff"/>
+  <g stroke="rgba(24,29,26,0.08)" stroke-width="1">
+    <line x1="70" y1="40"  x2="610" y2="40"/>
+    <line x1="70" y1="120" x2="610" y2="120"/>
+    <line x1="70" y1="200" x2="610" y2="200"/>
+    <line x1="70" y1="280" x2="610" y2="280"/>
+  </g>
+  <line x1="70" y1="340" x2="610" y2="340" stroke="#343b43" stroke-width="1.5"/>
+  <line x1="70" y1="40"  x2="70"  y2="340" stroke="#343b43" stroke-width="1.5"/>
+
+  <polyline fill="none" stroke="#2563eb" stroke-width="3"
+            points="110,300 235,268 360,214 485,166 600,120"/>
+  <g fill="#2563eb">
+    <circle cx="110" cy="300" r="5"/>
+    <circle cx="235" cy="268" r="5"/>
+    <circle cx="360" cy="214" r="5"/>
+    <circle cx="485" cy="166" r="5"/>
+    <circle cx="600" cy="120" r="5"/>
+  </g>
+
+  <g font-family="system-ui, sans-serif" font-size="14" fill="#667269">
+    <text x="110" y="364" text-anchor="middle">Q3</text>
+    <text x="235" y="364" text-anchor="middle">Q4</text>
+    <text x="360" y="364" text-anchor="middle">Q1</text>
+    <text x="485" y="364" text-anchor="middle">Q2</text>
+    <text x="600" y="364" text-anchor="middle">Q3</text>
+    <text x="60" y="345" text-anchor="end">8k</text>
+    <text x="60" y="205" text-anchor="end">11k</text>
+    <text x="60" y="45"  text-anchor="end">14k</text>
+  </g>
+  <text x="70" y="24" font-family="system-ui, sans-serif" font-size="15"
+        font-weight="700" fill="#1f2d39">Units per week</text>
+</svg>

@@ -1,0 +1,29 @@
+---
+layout: broken
+items:
+  - Linha 1 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 2 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 3 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 4 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 5 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 6 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 7 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 8 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 9 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 10 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 11 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 12 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 13 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 14 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 15 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 16 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 17 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 18 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 19 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 20 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 21 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 22 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 23 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 24 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+  - Linha 25 de um corpo de texto deliberadamente longo demais para caber na caixa disponível neste slide.
+---

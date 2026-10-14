@@ -1,0 +1,8 @@
+{{- /* split: media on the left, commentary on the right.
+       Fields: media (image path), alt (optional). Body is the commentary. */ -}}
+<div class="split">
+  <div class="split-media">
+    <img src="{{ str (get .Fields "media") }}" alt="{{ str (get .Fields "alt") }}">
+  </div>
+  <div class="split-copy">{{ .Body }}</div>
+</div>

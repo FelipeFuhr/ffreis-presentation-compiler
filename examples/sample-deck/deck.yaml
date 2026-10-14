@@ -1,0 +1,8 @@
+# A brand-free deck used by `make smoke-check` and the render tests. It is
+# deliberately dull: its job is to exercise every layout the sample theme ships.
+title: Quarterly Operations Review
+subtitle: Throughput, cost and the plan for next quarter
+client: Sample Industries
+theme: sample
+aspect: "16:9"
+footer: Sample Industries · Operations

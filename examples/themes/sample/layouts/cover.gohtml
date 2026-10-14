@@ -1,0 +1,16 @@
+{{- /* cover: deck-level title page. Reads the deck manifest, not slide fields,
+       so the title lives in exactly one place. */ -}}
+<div>
+  {{- with .Slide.Kicker }}
+  <p class="cover-kicker">{{ . }}</p>
+  {{- end }}
+  <h1 class="cover-title">{{ default .Deck.Title .Slide.Title }}</h1>
+  {{- with .Deck.Subtitle }}
+  <p class="cover-subtitle">{{ . }}</p>
+  {{- end }}
+  <hr class="cover-rule">
+  {{ .Body }}
+</div>
+{{- with .Deck.Client }}
+<p class="cover-meta">{{ . }}</p>
+{{- end }}

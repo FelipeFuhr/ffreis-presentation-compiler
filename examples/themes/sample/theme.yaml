@@ -1,0 +1,5 @@
+# A deliberately neutral theme. It exists so `make smoke-check` and the test
+# suite have something real to render; brand themes live in consumer repos.
+name: sample
+fonts:
+  - system-ui

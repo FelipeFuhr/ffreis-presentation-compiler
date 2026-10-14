@@ -1,0 +1,7 @@
+{{- /* bullets: a list of points. Fields: items (sequence of strings). */ -}}
+<ul class="bullets">
+{{- range list (get .Fields "items") }}
+  <li>{{ str . }}</li>
+{{- end }}
+</ul>
+{{ .Body }}

@@ -1,0 +1,27 @@
+/* Design tokens. A brand theme replaces the values and keeps the names, so
+   layouts never hardcode a colour. */
+:root {
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.1);
+  --accent-line: rgba(37, 99, 235, 0.2);
+  --accent-text: #11335f;
+
+  --paper: #f7f6f3;
+  --paper-strong: #eceae4;
+  --ink: #343b43;
+  --ink-strong: #1f2d39;
+  --muted: #667269;
+
+  --hairline: rgba(24, 29, 26, 0.08);
+  --shadow: 0 0.06in 0.2in rgba(23, 27, 25, 0.04);
+
+  --radius: 0.08in;
+  --gap: 0.28in;
+  --margin: 0.62in;
+
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --size-kicker: 10.5pt;
+  --size-title: 25pt;
+  --size-body: 13.5pt;
+  --size-small: 10pt;
+}

@@ -1,0 +1,30 @@
+{{- /* Chrome: the frame every slide shares. Bare layouts render their own
+       full-bleed content and opt out of kicker/title/footer. */ -}}
+{{- $bare := or (eq .Slide.Layout "cover") (eq .Slide.Layout "section") -}}
+<section class="slide slide--{{ .Slide.Layout }}{{ if $bare }} slide--bare{{ end }}"
+         id="slide-{{ .Slide.Number }}"
+         data-slide="{{ .Slide.Number }}"
+         data-layout="{{ .Slide.Layout }}">
+{{- if $bare }}
+  {{ .Content }}
+{{- else }}
+  {{- with .Slide.Badge }}
+  <img class="badge" src="{{ . }}" alt="">
+  {{- end }}
+  {{- with .Slide.Phase }}
+  <span class="phase">{{ . }}</span>
+  {{- end }}
+  {{- with .Slide.Kicker }}
+  <p class="kicker">{{ . }}</p>
+  {{- end }}
+  {{- with .Slide.Title }}
+  <h2 class="slide-title">{{ . }}</h2>
+  <hr class="rule">
+  {{- end }}
+  <div class="slide-body" data-measure="body">{{ .Content }}</div>
+  <footer class="slide-footer">
+    <span>{{ .Deck.Footer }}</span>
+    <span>{{ .Slide.Number }}</span>
+  </footer>
+{{- end }}
+</section>

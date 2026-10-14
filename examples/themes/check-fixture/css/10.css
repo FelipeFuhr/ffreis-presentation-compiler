@@ -1,0 +1,31 @@
+/* A face whose file does not exist: triggers `font-fallback`. */
+@font-face {
+  font-family: NoSuchFontFamily;
+  src: url("fonts/missing.woff2") format("woff2");
+}
+
+:root { --accent: #cccccc; }
+
+.slide {
+  padding: 0.5in;
+  background: #fff;
+  font-family: system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Fixed height with far more content than fits: triggers `overflow`. */
+.slide-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 6px type: triggers `tiny-type` (floor is 11px). */
+.too-small { font-size: 6px; }
+
+/* #bbbbbb on white is about 1.9:1: triggers `contrast` (needs 4.5:1). */
+.low-contrast { color: #bbbbbb; font-size: 14px; }
+
+/* Pushed past the right edge: triggers `out-of-bounds`. */
+.escapes { position: absolute; left: 13in; top: 1in; }

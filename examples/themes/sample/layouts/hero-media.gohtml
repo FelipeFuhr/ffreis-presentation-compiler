@@ -1,0 +1,7 @@
+{{- /* hero-media: one image filling the body. Fields: media, alt, caption. */ -}}
+<div class="hero-media">
+  <img src="{{ str (get .Fields "media") }}" alt="{{ str (get .Fields "alt") }}">
+</div>
+{{- with get .Fields "caption" }}
+<p class="media-caption">{{ str . }}</p>
+{{- end }}
