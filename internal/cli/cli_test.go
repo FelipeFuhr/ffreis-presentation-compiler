@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -670,5 +671,110 @@ func TestServeExitsWithAnErrorWhenItCannotListen(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "listen on") {
 		t.Errorf("stderr does not mention the listen failure:\n%s", stderr)
+	}
+}
+
+// fakeRenderer stands in for a browser-backed adapter: it writes whatever
+// bytes a test hands it and reports the format it claims to produce.
+type fakeRenderer struct {
+	format  engine.Format
+	name    string
+	content []byte
+	err     error
+}
+
+func (f *fakeRenderer) Format() engine.Format { return f.format }
+func (f *fakeRenderer) Tool() string          { return "fake" }
+func (f *fakeRenderer) Available() bool       { return true }
+
+func (f *fakeRenderer) Render(_ context.Context, job engine.Job) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	path := filepath.Join(job.OutDir, f.name)
+	if err := os.WriteFile(path, f.content, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// stubRendererFor swaps the adapter factory for the duration of a test.
+func stubRendererFor(t *testing.T, r engine.Renderer, err error) {
+	t.Helper()
+	original := rendererFor
+	rendererFor = func(engine.Format, map[int]string) (engine.Renderer, error) {
+		if err != nil {
+			return nil, err
+		}
+		return r, nil
+	}
+	t.Cleanup(func() { rendererFor = original })
+}
+
+// pdfWithPages builds the smallest bytes CountPDFPages will count as n pages.
+func pdfWithPages(n int) []byte {
+	out := []byte("%PDF-1.4\n")
+	for i := 0; i < n; i++ {
+		out = append(out, []byte("/Type /Page\n")...)
+	}
+	return out
+}
+
+// TestBuildFailsWhenThePDFPaginatedWrong drives build through the pdf-pages
+// comparison with a stubbed adapter, so the rule is exercised without a
+// browser deciding the outcome. A silently dropped page is invisible until
+// someone presents, which is the whole reason the rule runs on every build.
+func TestBuildFailsWhenThePDFPaginatedWrong(t *testing.T) {
+	stubRendererFor(t, &fakeRenderer{
+		format: engine.FormatPDF, name: "sample-deck.pdf", content: pdfWithPages(3),
+	}, nil)
+
+	code, _, stderr := exec("build", "-deck-root", sampleDeck, "-theme-root", sampleThemes,
+		"-out", t.TempDir(), "-formats", "html,pdf")
+
+	if code != exitError {
+		t.Fatalf("a 3-page PDF for a 7-slide deck built cleanly\nstderr: %s", stderr)
+	}
+	if !strings.Contains(stderr, "3") || !strings.Contains(stderr, "7") {
+		t.Errorf("stderr does not name both counts:\n%s", stderr)
+	}
+}
+
+func TestBuildAcceptsAPDFWhosePagesMatchTheSlides(t *testing.T) {
+	stubRendererFor(t, &fakeRenderer{
+		format: engine.FormatPDF, name: "sample-deck.pdf", content: pdfWithPages(7),
+	}, nil)
+
+	code, _, stderr := exec("build", "-deck-root", sampleDeck, "-theme-root", sampleThemes,
+		"-out", t.TempDir(), "-formats", "html,pdf")
+
+	if code != exitOK {
+		t.Fatalf("a correctly paginated PDF failed the build: %s", stderr)
+	}
+}
+
+func TestBuildAbortsWhenAnAdapterFails(t *testing.T) {
+	// A failing adapter must stop the build rather than leave a partial set of
+	// artifacts that looks complete.
+	stubRendererFor(t, &fakeRenderer{
+		format: engine.FormatPDF, name: "x.pdf", err: errors.New("chrome blew up"),
+	}, nil)
+
+	code, _, stderr := exec("build", "-deck-root", sampleDeck, "-theme-root", sampleThemes,
+		"-out", t.TempDir(), "-formats", "html,pdf")
+
+	if code != exitError || !strings.Contains(stderr, "chrome blew up") {
+		t.Errorf("exit=%d, stderr=%s", code, stderr)
+	}
+}
+
+func TestBuildReportsAnUnavailableAdapter(t *testing.T) {
+	stubRendererFor(t, nil, errors.New("format \"docx\" has no adapter yet"))
+
+	code, _, stderr := exec("build", "-deck-root", sampleDeck, "-theme-root", sampleThemes,
+		"-out", t.TempDir(), "-formats", "html,pdf")
+
+	if code != exitError || !strings.Contains(stderr, "no adapter") {
+		t.Errorf("exit=%d, stderr=%s", code, stderr)
 	}
 }

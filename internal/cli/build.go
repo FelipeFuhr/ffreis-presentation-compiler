@@ -255,7 +255,14 @@ func renderFormats(ctx context.Context, formats []engine.Format, job engine.Job,
 	return paths, nil
 }
 
-func rendererFor(f engine.Format, notes map[int]string) (engine.Renderer, error) {
+// rendererFor is a variable, not a plain function, for the same reason
+// engine.LookPath is: it is the one boundary in this file that needs a browser.
+// Stubbing it lets a test drive `build` all the way through the pdf-pages
+// comparison — the rule whose entire purpose is to notice a PDF that paginated
+// wrong — without a real Chrome deciding whether the test passes.
+var rendererFor = defaultRendererFor
+
+func defaultRendererFor(f engine.Format, notes map[int]string) (engine.Renderer, error) {
 	switch f {
 	case engine.FormatPDF:
 		return engine.NewPDFRenderer(), nil
