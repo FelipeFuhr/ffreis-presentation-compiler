@@ -266,7 +266,19 @@ Visual regression for the shipped example deck. Nothing else in this fleet
 owns visual regression today, so this is new, deliberately minimal ground:
 render `examples/sample-deck` to PNG (one image per slide, at 2x — the PNG
 adapter `internal/engine` already ships) and compare each slide against an
-approved baseline committed under `examples/golden/`.
+approved baseline under `examples/golden/`.
+
+> **The baselines are NOT committed yet, so `make golden` errors until you
+> run `make golden-update` once.** It fails loudly rather than passing
+> vacuously, and nothing gates on it, so this is a seeded-capability gap
+> rather than a broken build. The blocker is the shared
+> `hygiene-binary-files` pre-commit hook, which rejects every binary with no
+> allowlist (`platform/ffreis-platform-standards/lefthook/scripts/check_binary_files.sh`),
+> and this repo has never committed a binary file. Until that hook grows an
+> opt-in allowlist **upstream**, visual regression here is local-only — the
+> code is complete and tested, but it cannot catch drift for anyone who has
+> not seeded their own baseline, which is most of the point. Do not widen the
+> hook from a consumer repo.
 
 - **The comparison is perceptual, not byte-exact.** Chrome's PNG encoder is
   not byte-reproducible across versions — subpixel rounding and anti-aliasing
@@ -293,8 +305,7 @@ approved baseline committed under `examples/golden/`.
   grey) and names the path in its own output line, so a human has somewhere
   to look without being told a bespoke path.
 - Baselines are binary files in a Go repo, so they are kept as small as
-  reasonably possible for a 7-slide deck (~670 KB total as of this writing)
-  and `examples/` is on the large-files hygiene hook's allowlist.
+  reasonably possible for a 7-slide deck (~670 KB total as of this writing).
 
 ## Model-assisted review (`metrics`, `review`)
 
