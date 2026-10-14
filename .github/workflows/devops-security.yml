@@ -24,8 +24,9 @@ jobs:
       security-events: write
     # Consolidated fs-security bundle: Trivy(fs) + Grype(fs) + gitleaks in ONE job
     # (was 3 separate jobs). upload-sarif off: GHAS/code-scanning not enabled.
-    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-security-fs.yml@caa797cc7baec52e99f21b86f532a4b7c88cf4fa # fix/grype-install-outside-scan-path
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-security-fs.yml@3c4c9012ea1e8edfda316cf0d87052b33e5fa3fe # v2.1.0
     with:
+      runner: '["ubuntu-latest"]'
       working-directory: "."
       scan-history: true
       upload-sarif: false
@@ -36,25 +37,34 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-codeql.yml@caa797cc7baec52e99f21b86f532a4b7c88cf4fa # fix/grype-install-outside-scan-path
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-codeql.yml@3c4c9012ea1e8edfda316cf0d87052b33e5fa3fe # v2.1.0
     with:
+      runner: '["ubuntu-latest"]'
       languages: "go"
       source-root: "."
 
   govulncheck:
     permissions:
       contents: read
-    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-security.yml@b253b2329a11552b6276781c56f6dc6fd1718710
+    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-security.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
-      go-version: "1.25.8"
+      runner: '["ubuntu-latest"]'
+      go-version: "1.26.9"
+      # The callee runs govulncheck under its OWN toolchain input, which
+      # defaults to 1.26.8 — still carrying GO-2026-6617 et al, all fixed at
+      # 1.26.9. Without this the job fails on stdlib CVEs regardless of
+      # go-version above.
+      govulncheck-go-version: "1.26.9"
       working-directory: "."
 
   semgrep:
     permissions:
       contents: read
+      actions: read
       security-events: write
-    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-semgrep-sarif.yml@b253b2329a11552b6276781c56f6dc6fd1718710
+    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-semgrep-sarif.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
+      runner: '["ubuntu-latest"]'
       working-directory: "."
       upload-sarif: false
 
@@ -64,8 +74,9 @@ jobs:
       contents: read
       actions: read
       security-events: write
-    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-osv-scanner.yml@caa797cc7baec52e99f21b86f532a4b7c88cf4fa # fix/grype-install-outside-scan-path
+    uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-osv-scanner.yml@3c4c9012ea1e8edfda316cf0d87052b33e5fa3fe # v2.1.0
     with:
+      runner: '["ubuntu-latest"]'
       working-directory: "."
       upload-sarif: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false }}
 
@@ -73,7 +84,9 @@ jobs:
   lint:
     permissions:
       contents: read
-    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-lint.yml@b253b2329a11552b6276781c56f6dc6fd1718710
+      pull-requests: read
+    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-lint.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
-      go-version: "1.25.8"
+      runner: '["ubuntu-latest"]'
+      go-version: "1.26.9"
       working-directory: "."

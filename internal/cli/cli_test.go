@@ -59,7 +59,7 @@ func TestBuildRequiresItsRoots(t *testing.T) {
 	}{
 		{"no deck root", []string{"build", "-theme-root", sampleThemes}, "-deck-root is required"},
 		{"no theme root", []string{"build", "-deck-root", sampleDeck}, "-theme-root is required"},
-		{"unparseable flag", []string{"build", "-nonsense"}, "flag provided but not defined"},
+		{"unparsable flag", []string{"build", "-nonsense"}, "flag provided but not defined"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

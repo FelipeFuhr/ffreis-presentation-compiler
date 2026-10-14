@@ -2,6 +2,10 @@ name: DevOps / Go CI
 
 on:
   pull_request:
+    # `test` and `integration` below are gated on the PR not being a draft, so
+    # without ready_for_review they are never re-triggered at promotion and the
+    # check reads green having never run.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "**/*.go"
       - "go.mod"
@@ -19,10 +23,6 @@ on:
   merge_group:
     types: [checks_requested]
 
-permissions:
-  contents: read
-  actions: write
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
@@ -30,41 +30,59 @@ concurrency:
 
 jobs:
   mod-tidy:
-    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-mod-tidy-check.yml@b253b2329a11552b6276781c56f6dc6fd1718710
+    permissions:
+      contents: read
+    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-mod-tidy-check.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
-      go-version: "1.25.8"
+      runner: '["ubuntu-latest"]'
+      go-version: "1.26.9"
       working-directory: "."
 
   fmt:
-    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-fmt.yml@b253b2329a11552b6276781c56f6dc6fd1718710
+    permissions:
+      contents: read
+    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-fmt.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
-      go-version: "1.25.8"
+      runner: '["ubuntu-latest"]'
+      go-version: "1.26.9"
       working-directory: "."
 
   lint:
+    permissions:
+      contents: read
+      pull-requests: read
     needs: [fmt]
-    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-lint.yml@b253b2329a11552b6276781c56f6dc6fd1718710
+    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-lint.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
-      go-version: "1.25.8"
+      runner: '["ubuntu-latest"]'
+      go-version: "1.26.9"
       working-directory: "."
 
   test:
+    permissions:
+      contents: read
+      id-token: write
     if: ${{ !github.event.pull_request.draft }}
 
     needs: [fmt]
-    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-test.yml@b253b2329a11552b6276781c56f6dc6fd1718710
+    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-test.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
-      go-version: "1.25.8"
+      runner: '["ubuntu-latest"]'
+      go-version: "1.26.9"
       working-directory: "."
       run-govulncheck: false
 
   integration:
+    permissions:
+      contents: read
+      id-token: write
     if: ${{ !github.event.pull_request.draft }}
 
     needs: [fmt]
-    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-test.yml@b253b2329a11552b6276781c56f6dc6fd1718710
+    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-test.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
-      go-version: "1.25.8"
+      runner: '["ubuntu-latest"]'
+      go-version: "1.26.9"
       working-directory: "."
       test-tags: "integration"
       run-govulncheck: false

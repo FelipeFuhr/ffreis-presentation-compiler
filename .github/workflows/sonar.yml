@@ -3,6 +3,9 @@ name: Code Quality (SonarCloud)
 on:
   workflow_dispatch:
   pull_request:
+    # The sonar job is draft-gated; without ready_for_review it is never
+    # re-triggered at promotion.
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "**/*.go"
       - "go.mod"
@@ -32,9 +35,10 @@ jobs:
 
     permissions:
       contents: read
-    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-sonar.yml@b253b2329a11552b6276781c56f6dc6fd1718710
+    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-sonar.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
-      go-version: "1.25.8"
+      runner: '["ubuntu-latest"]'
+      go-version: "1.26.9"
       working-directory: "."
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

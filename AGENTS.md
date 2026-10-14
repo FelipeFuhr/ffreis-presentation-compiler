@@ -26,7 +26,7 @@ Consumer-agnostic. It expects:
 - a **deck** root: `deck.yaml` + `slides/*.md` (+ optional `assets/`);
 - a **themes** root containing one subdirectory per theme.
 
-```
+```text
 <deck-root>/                      <themes-root>/<name>/
   deck.yaml                         theme.yaml
   slides/NN-name.md                 css/*.css        (concatenated in filename order)
@@ -51,11 +51,11 @@ HTML is produced in-process; every format derived from it sits behind a
 construction is unit-tested with no browser installed.
 
 | Format | Tool | Notes |
-|---|---|---|
+| --- | --- | --- |
 | HTML | — | pure Go (`html/template`); always produced |
-| PDF | `google-chrome` (or `chromium`) | `--headless=new --print-to-pdf`; one slide per page |
-| PNG | Chrome over CDP | one image per slide in `slides/`, at 2x CSS resolution |
-| PPTX | Chrome over CDP | image mode: one full-bleed render per slide, text kept in speaker notes |
+| PDF | `google-chrome`/`chromium` | `--headless=new --print-to-pdf` |
+| PNG | Chrome over CDP | one image/slide in `slides/`, at 2x CSS resolution |
+| PPTX | Chrome over CDP | image mode: full-bleed render; text as notes |
 
 **Page geometry is the load-bearing detail.** `internal/render/base.gohtml`
 emits `@page { size: <W>in <H>in; margin: 0 }` and gives `.slide` exactly those
@@ -81,7 +81,7 @@ chart:
 
 The contract a generator honours:
 
-```
+```text
 <tool> <spec> --out <path> --tokens <json> [--data <path>] [args…]
 ```
 
@@ -190,7 +190,7 @@ make doctor          # which adapters are available here
 
 ## Structure
 
-```
+```text
 cmd/ffreis-presentation-compiler/  one-liner → cli.Run
 internal/cli/                      dispatch + per-subcommand flag sets
 internal/deck/                     content model and loader
@@ -198,7 +198,7 @@ internal/theme/                    theme loading, template FuncMap
 internal/render/                   document shell + slide assembly (base.gohtml)
 internal/check/                    measured checks (probe.js)
 internal/engine/                   Renderer port, Runner, PDF/PNG/PPTX adapters
-internal/engine/chrome/            CDP client — slide-agnostic, shared by check and the adapters
+internal/engine/chrome/            CDP client, shared by check + adapters
 internal/engine/pptx/              OOXML writer (assets/ holds the static parts)
 internal/gen/                      generator hook (charts, diagrams) + cache
 internal/logx/                     slog construction

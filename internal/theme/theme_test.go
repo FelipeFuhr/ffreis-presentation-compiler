@@ -108,7 +108,7 @@ func TestLoadRejectsBrokenThemes(t *testing.T) {
 		}
 	})
 
-	t.Run("unparseable template", func(t *testing.T) {
+	t.Run("unparsable template", func(t *testing.T) {
 		root := writePartialTheme(t, map[string]string{
 			"theme.yaml":           "name: broken\n",
 			"slide.gohtml":         "{{ .Unclosed ",
