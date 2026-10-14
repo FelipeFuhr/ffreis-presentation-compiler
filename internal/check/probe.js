@@ -39,7 +39,7 @@
   const parseRGB = (value) => {
     const m = /rgba?\(([^)]+)\)/.exec(value || "");
     if (!m) return null;
-    const parts = m[1].split(",").map((p) => parseFloat(p));
+    const parts = m[1].split(",").map((p) => Number.parseFloat(p));
     return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
   };
 
@@ -70,7 +70,7 @@
   const isVisible = (el, style) =>
     style.display !== "none" &&
     style.visibility !== "hidden" &&
-    parseFloat(style.opacity || "1") > 0.05 &&
+    Number.parseFloat(style.opacity || "1") > 0.05 &&
     el.getBoundingClientRect().width > 0 &&
     el.getBoundingClientRect().height > 0;
 
@@ -163,7 +163,7 @@
     for (const el of slide.querySelectorAll("*")) {
       const style = getComputedStyle(el);
       if (!isVisible(el, style) || !ownText(el)) continue;
-      const size = parseFloat(style.fontSize);
+      const size = Number.parseFloat(style.fontSize);
       if (size && size < MIN_FONT_PX) {
         out.push(finding(n, "tiny-type", describe(el), `${size.toFixed(1)}px rendered, floor is ${MIN_FONT_PX}px`));
       }
@@ -179,8 +179,8 @@
       if (!isVisible(el, style) || !ownText(el)) continue;
       const fg = parseRGB(style.color);
       if (!fg || fg.a <= 0.1) continue;
-      const size = parseFloat(style.fontSize);
-      const large = size >= 24 || (size >= 18.66 && parseInt(style.fontWeight, 10) >= 700);
+      const size = Number.parseFloat(style.fontSize);
+      const large = size >= 24 || (size >= 18.66 && Number.parseInt(style.fontWeight, 10) >= 700);
       const need = large ? 3 : 4.5;
       const ratio = contrastRatio(fg, backgroundOf(el));
       if (ratio < need) {
