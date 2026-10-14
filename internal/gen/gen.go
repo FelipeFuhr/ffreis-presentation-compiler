@@ -19,6 +19,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/pathsafe"
 )
 
 // Dir is the subdirectory of the output directory that generated files land in.
@@ -91,8 +93,14 @@ func (r Registry) Resolve(ctx context.Context, run Runner, req Request) (string,
 		return "", fmt.Errorf("generator %q needs %q on PATH", g.Name(), g.Tool())
 	}
 
-	specPath := filepath.Join(req.DeckRoot, req.Spec.Spec)
-	specBytes, err := os.ReadFile(specPath) //nolint:gosec // spec paths are authored in the operator's own deck
+	// Contain is the only thing standing between a deck author's spec/data
+	// path and a read outside the deck root; filepath.Join alone would follow
+	// a ".." straight out of it.
+	specPath, err := pathsafe.Contain(req.DeckRoot, req.Spec.Spec)
+	if err != nil {
+		return "", fmt.Errorf("generator %q: %w", g.Name(), err)
+	}
+	specBytes, err := os.ReadFile(specPath) //nolint:gosec // contained within the operator's own deck root, checked above
 	if err != nil {
 		return "", fmt.Errorf("generator %q: %w", g.Name(), err)
 	}
@@ -100,7 +108,9 @@ func (r Registry) Resolve(ctx context.Context, run Runner, req Request) (string,
 	var dataPath string
 	var dataBytes []byte
 	if req.Spec.Data != "" {
-		dataPath = filepath.Join(req.DeckRoot, req.Spec.Data)
+		if dataPath, err = pathsafe.Contain(req.DeckRoot, req.Spec.Data); err != nil {
+			return "", fmt.Errorf("generator %q: %w", g.Name(), err)
+		}
 		if dataBytes, err = os.ReadFile(dataPath); err != nil { //nolint:gosec // as above
 			return "", fmt.Errorf("generator %q: %w", g.Name(), err)
 		}

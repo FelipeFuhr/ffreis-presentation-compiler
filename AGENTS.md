@@ -149,20 +149,76 @@ two of them significant (32px and 60px of content silently cut).
   deck and theme — and fails unless **all six rules fire**. Without it a checker
   that silently stopped working would look exactly like a clean deck.
 
+## Contract (`validate`)
+
+`validate` checks a **loaded** deck against its theme's field vocabulary
+before anything renders — `deck.Load` itself only fails on a missing
+`layout:` key, so without this stage a bad field reaches a Go template and
+produces either a blank region or a confusing template error three steps
+downstream. `build` runs the same check before generators and render, and
+aborts on findings; there is no flag to skip it. Both report every finding
+in one pass, naming the slide's source file and the offending key, not just
+the first problem.
+
+A theme's field vocabulary is declarative, the same idiom as `.Fields`
+itself: `internal/contract/contract.yaml` lists, per layout, the keys it
+`required`s and the keys it additionally `allowed`s; any other front-matter
+key is an error. That file is embedded via `//go:embed` as the compiler's
+shipped default, describing the sample theme's layouts. A theme overrides it
+wholesale with its own `contract.yaml` at its theme root — adding a layout is
+then a YAML change, not a Go change. A `chart:`/`diagram:` block is
+recognised on every layout unconditionally, the same way chrome keys are, so
+it is never part of a layout's own vocabulary.
+
+Rules: `unknown-layout` (names an available layout, from
+`theme.LayoutNames()`), `missing-field`, `unknown-field`, `missing-asset`
+(a `media`, or a chart/diagram `spec`/`data`, that does not exist on disk),
+`unsafe-path`, `invalid-field` (a malformed chart/diagram block, or an asset
+field that is not a non-empty string), `invalid-contract` (a theme's own
+`contract.yaml` fails to parse). Deliberately not implemented: a
+duplicate-slide-id check. Two slides sharing a title and layout is not an
+error — a consumer deck legitimately repeats slides — and detecting a
+duplicate by source basename alone could not be made precise without risking
+false positives, so the rule was skipped rather than shipped noisy.
+
+**Path containment is the security-sensitive part.** Three places resolve a
+deck- or theme-author-supplied path against a root: `theme.Load` joins
+`deck.yaml`'s `theme:` value onto the themes root; `gen.Registry.Resolve`
+joins a chart/diagram block's `spec`/`data` onto the deck root; `validate`
+itself joins a slide's `media` (and, redundantly, the same chart/diagram
+`spec`/`data`) onto the deck root to check it exists. `filepath.Join` alone
+does not stop a `..` traversal, and a naive `strings.HasPrefix` check on the
+joined absolute path is its own trap — root `/a/deck` has the same string
+prefix as the unrelated sibling `/a/deckx/f`. `internal/pathsafe.Contain` is
+the one helper all three call: it resolves via `filepath.Rel` and rejects an
+absolute candidate outright, so every call site gets the same answer to "does
+this still live under root". A theme name additionally may not contain a
+path separator at all — it names a single subdirectory, never a path — which
+`theme.Load` rejects before the join is even attempted.
+
+`make validate-selftest` renders `examples/contract-fixture` — a
+deliberately broken deck against the sample theme — and fails unless **all
+five rules fire**. Without it a validator that silently stopped catching one
+of them would look exactly like a clean deck.
+
 ## Commands
 
 ```bash
 go run ./cmd/ffreis-presentation-compiler build \
   -deck-root examples/sample-deck -theme-root examples/themes \
   -out dist -formats html,pdf
+go run ./cmd/ffreis-presentation-compiler validate \
+  -deck-root examples/sample-deck -theme-root examples/themes
 go run ./cmd/ffreis-presentation-compiler doctor
 
-make build           # render the example deck (override DECK= THEMES= OUT= FORMATS=)
-make smoke-check     # end-to-end render + pagination assertion
-make check           # render the example deck and measure it
-make check-selftest  # prove the checker still catches all six rules
-make export-selftest # prove the generated pptx actually opens
-make doctor          # which adapters are available here
+make build             # render the example deck (override DECK= THEMES= OUT= FORMATS=)
+make validate-deck     # check the example deck's contract (override DECK= THEMES=)
+make validate-selftest # prove the validator still catches all five rules
+make smoke-check       # end-to-end render + pagination assertion
+make check             # render the example deck and measure it
+make check-selftest    # prove the checker still catches all six rules
+make export-selftest   # prove the generated pptx actually opens
+make doctor            # which adapters are available here
 ```
 
 ## Non-obvious facts
@@ -195,6 +251,8 @@ cmd/ffreis-presentation-compiler/  one-liner → cli.Run
 internal/cli/                      dispatch + per-subcommand flag sets
 internal/deck/                     content model and loader
 internal/theme/                    theme loading, template FuncMap
+internal/contract/                 field-vocabulary validation (contract.yaml)
+internal/pathsafe/                 the one path-containment helper, shared by theme/gen/contract
 internal/render/                   document shell + slide assembly (base.gohtml)
 internal/check/                    measured checks (probe.js)
 internal/engine/                   Renderer port, Runner, PDF/PNG/PPTX adapters
@@ -206,15 +264,16 @@ examples/sample-deck/              brand-free fixture deck
 examples/themes/sample/            brand-free fixture theme
 examples/check-fixture/            deliberately broken deck, for check-selftest
 examples/themes/check-fixture/     deliberately broken theme, ditto
+examples/contract-fixture/         deliberately broken deck, for validate-selftest
 ```
 
 ## Roadmap
 
 Implemented: content model, theme + layouts, HTML, PDF, PNG, PPTX (image mode),
-the generator hook, `check`, `doctor`, and three self-tests. Next, in order: an
-explicit contract file for deck.yaml; an `overlap` rule (deferred — parent/child
-and absolutely-positioned chrome make it the most false-positive-prone of the
-set); `serve --watch`; model-assisted review.
+the generator hook, `check`, `validate`, `doctor`, and four self-tests. Next,
+in order: an `overlap` rule (deferred — parent/child and absolutely-positioned
+chrome make it the most false-positive-prone of the set); `serve --watch`;
+model-assisted review.
 
 ## Keeping this file current
 

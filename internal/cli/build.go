@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/contract"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/deck"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/gen"
@@ -79,6 +80,13 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 	logger.Debug("loaded", "slides", len(d.Slides), "theme", th.Name, "layouts", th.LayoutNames())
+
+	// Validate before anything renders: a bad field here is a named finding,
+	// not a blank region or a confusing template error three steps downstream.
+	if findings := contract.Validate(d, th, opts.deckRoot); len(findings) > 0 {
+		_, _ = fmt.Fprint(stderr, contract.Report(findings))
+		return exitError
+	}
 
 	// Generators run before rendering: each writes an image and sets the
 	// slide's media field, so layouts cannot tell a generated chart from an
