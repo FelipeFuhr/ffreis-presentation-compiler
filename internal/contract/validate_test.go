@@ -358,3 +358,50 @@ func TestValidateStillFailsAFatalFindingAlongsideAnAdvisory(t *testing.T) {
 		t.Errorf("a missing required field stopped being fatal:\n%s", contract.Report(findings))
 	}
 }
+
+// TestRowArityDetailIsGrammatical guards the wording of a report an author
+// reads when their table is malformed: "1 cells" undercuts the message, and
+// the extra-cells case must name the comma cause while the too-few case must
+// not, since the cause there is different.
+func TestRowArityDetailIsGrammatical(t *testing.T) {
+	th := themeWithExtraLayout(t, "unused")
+	cases := []struct {
+		name       string
+		row        []any
+		wantPhrase string
+		wantCause  bool
+	}{
+		// Singular only when the row really has one cell, and the comma cause
+		// is named only when there are MORE cells than columns — too few has a
+		// different cause entirely.
+		{"one cell, fewer than declared", []any{"a"}, "has 1 cell but", false},
+		{"more cells than declared", []any{"a", "b", "c"}, "has 3 cells but", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &deck.Deck{Slides: []deck.Slide{{
+				Number: 1, Source: "s.md", Layout: "table",
+				Fields: map[string]any{
+					"columns": []any{"A", "B"},
+					"rows":    []any{tc.row},
+				},
+			}}}
+
+			var detail string
+			for _, f := range contract.Validate(d, th, t.TempDir()) {
+				if f.Rule == contract.RuleRowArity {
+					detail = f.Detail
+				}
+			}
+			if detail == "" {
+				t.Fatalf("no row-arity finding for %v", tc.row)
+			}
+			if !strings.Contains(detail, tc.wantPhrase) {
+				t.Errorf("detail %q does not contain %q", detail, tc.wantPhrase)
+			}
+			if got := strings.Contains(detail, "comma"); got != tc.wantCause {
+				t.Errorf("detail %q names the comma cause = %v, want %v", detail, got, tc.wantCause)
+			}
+		})
+	}
+}

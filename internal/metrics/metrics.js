@@ -11,6 +11,16 @@
 // Returns [{slide, layout, boxes, textLength, bulletCount, fontSizesPx,
 // palette, density, imageCount}].
 (() => {
+  // Explicit comparator rather than a bare .sort(). These are rgb() strings,
+  // so the default lexicographic order is already correct — but the default
+  // coerces to string, which IS wrong for numeric input, and a reader (or a
+  // scanner) cannot tell the two cases apart from the call site.
+  const byCodepoint = (a, b) => {
+    if (a < b) return -1;
+    if (a > b) return 1;
+    return 0;
+  };
+
   const isVisible = (el, style) =>
     style.display !== "none" &&
     style.visibility !== "hidden" &&
@@ -82,12 +92,7 @@
         colours.add(style.backgroundColor);
       }
     }
-    // Explicit comparator: these are rgb() strings, so the default
-    // lexicographic sort is already correct — but Array.sort's default
-    // coerces to string, which is a real bug for numeric input, and scanners
-    // cannot tell the two cases apart. Stating it costs a line and removes
-    // the ambiguity for the next reader too.
-    return [...colours].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    return [...colours].sort(byCodepoint);
   };
 
   // Density: text area over slide area. Leaves can share a touching edge, so

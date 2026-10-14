@@ -32,6 +32,13 @@ func parseMetricsOptions(args []string, stderr io.Writer) (*metricsOptions, erro
 	return &o, nil
 }
 
+// newMetricsBrowser is a variable for the same reason engine.LookPath and
+// rendererFor are: it is the one line in this file that needs a real browser,
+// and stubbing it lets a test drive runMetrics end to end — the JSON encoding,
+// the -out handling and the failure paths — without Chrome deciding whether
+// the test passes.
+var newMetricsBrowser = func() metrics.Browser { return chrome.New() }
+
 // runMetrics extracts per-slide layout metrics from a rendered deck and
 // writes them as JSON. This has standalone value beyond `make review`: it is
 // the input to any review, human or model.
@@ -48,7 +55,7 @@ func runMetrics(args []string, stdout, stderr io.Writer) int {
 		return exitError
 	}
 
-	results, err := metrics.Run(context.Background(), chrome.New(), engine.FileURL(index))
+	results, err := metrics.Run(context.Background(), newMetricsBrowser(), engine.FileURL(index))
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "metrics: %v\n", err)
 		return exitError

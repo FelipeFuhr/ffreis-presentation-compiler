@@ -2,11 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/metrics"
 )
 
 func TestMetricsRejectsBadFlags(t *testing.T) {
@@ -96,5 +101,58 @@ func TestWriteMetricsReportsAnUnwritableDestination(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "metrics:") {
 		t.Errorf("stderr does not name the failure:\n%s", stderr.String())
+	}
+}
+
+// fakeMetricsBrowser stands in for Chrome: it decodes nothing and simply
+// yields the result a real probe would have produced, or an error.
+type fakeMetricsBrowser struct {
+	payload string
+	err     error
+}
+
+func (f *fakeMetricsBrowser) Eval(_ context.Context, _, _ string, out any) error {
+	if f.err != nil {
+		return f.err
+	}
+	return json.Unmarshal([]byte(f.payload), out)
+}
+
+func stubMetricsBrowser(t *testing.T, b metrics.Browser) {
+	t.Helper()
+	original := newMetricsBrowser
+	newMetricsBrowser = func() metrics.Browser { return b }
+	t.Cleanup(func() { newMetricsBrowser = original })
+}
+
+func TestMetricsWritesJSONToAFile(t *testing.T) {
+	stubMetricsBrowser(t, &fakeMetricsBrowser{payload: `[{"slide":1,"layout":"cover","density":0.2}]`})
+	out := filepath.Join(t.TempDir(), "metrics.json")
+
+	code, stdout, stderr := exec("metrics", "-dir", t.TempDir(), "-out", out)
+
+	if code != exitOK {
+		t.Fatalf("exit=%d stderr=%s", code, stderr)
+	}
+	raw, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read metrics: %v", err)
+	}
+	if !strings.Contains(string(raw), `"layout": "cover"`) {
+		t.Errorf("metrics file does not carry the slide's layout:\n%s", raw)
+	}
+	// The path is printed so `make review` and a human can both find it.
+	if !strings.Contains(stdout, out) {
+		t.Errorf("stdout does not name the file written:\n%s", stdout)
+	}
+}
+
+func TestMetricsSurfacesABrowserFailure(t *testing.T) {
+	stubMetricsBrowser(t, &fakeMetricsBrowser{err: errors.New("chrome exploded")})
+
+	code, _, stderr := exec("metrics", "-dir", t.TempDir())
+
+	if code != exitError || !strings.Contains(stderr, "chrome exploded") {
+		t.Errorf("exit=%d stderr=%s", code, stderr)
 	}
 }
