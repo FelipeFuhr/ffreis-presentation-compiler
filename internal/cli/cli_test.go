@@ -241,6 +241,54 @@ func TestCheckOptionDefaults(t *testing.T) {
 	}
 }
 
+func TestServeRequiresItsRoots(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no deck root", []string{"serve", "-theme-root", sampleThemes}, "-deck-root is required"},
+		{"no theme root", []string{"serve", "-deck-root", sampleDeck}, "-theme-root is required"},
+		{"unparsable flag", []string{"serve", "-nonsense"}, "flag provided but not defined"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, _, stderr := exec(tc.args...)
+			if code != exitUsage {
+				t.Errorf("exit code = %d, want %d", code, exitUsage)
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Errorf("stderr does not mention %q:\n%s", tc.want, stderr)
+			}
+		})
+	}
+}
+
+func TestServeDefaultsToALoopbackAddress(t *testing.T) {
+	// A deck is unpublished client material; the default must never bind the
+	// whole LAN, only this machine.
+	opts, err := parseServeOptions([]string{"-deck-root", sampleDeck, "-theme-root", sampleThemes}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseServeOptions: %v", err)
+	}
+	if !strings.HasPrefix(opts.addr, "127.0.0.1:") {
+		t.Errorf("default -addr = %q, want a 127.0.0.1 address", opts.addr)
+	}
+}
+
+func TestServeAddrIsOverridable(t *testing.T) {
+	opts, err := parseServeOptions(
+		[]string{"-deck-root", sampleDeck, "-theme-root", sampleThemes, "-addr", "127.0.0.1:9999"},
+		io.Discard,
+	)
+	if err != nil {
+		t.Fatalf("parseServeOptions: %v", err)
+	}
+	if opts.addr != "127.0.0.1:9999" {
+		t.Errorf("addr = %q, want 127.0.0.1:9999", opts.addr)
+	}
+}
+
 func TestCheckIsReachableFromDispatch(t *testing.T) {
 	// Dispatch must route "check" somewhere; with no rendered deck it fails,
 	// which is enough to prove the verb is wired.
