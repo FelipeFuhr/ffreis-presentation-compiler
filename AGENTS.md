@@ -229,7 +229,7 @@ internal/engine/                   Renderer port, Runner, PDF/PNG/PPTX adapters
 internal/engine/chrome/            CDP client, shared by check + adapters
 internal/engine/pptx/              OOXML writer (assets/ holds the static parts)
 internal/gen/                      generator hook (charts, diagrams) + cache
-internal/serve/                    live-reload preview: render/watch/HTTP loop behind `serve`
+internal/serve/                    live-reload preview: render/watch/HTTP loop
 internal/logx/                     slog construction
 examples/sample-deck/              brand-free fixture deck
 examples/themes/sample/            brand-free fixture theme
