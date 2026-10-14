@@ -241,6 +241,90 @@ func TestCheckOptionDefaults(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresItsRoots(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no deck root", []string{"validate", "-theme-root", sampleThemes}, "-deck-root is required"},
+		{"no theme root", []string{"validate", "-deck-root", sampleDeck}, "-theme-root is required"},
+		{"unparsable flag", []string{"validate", "-nonsense"}, "flag provided but not defined"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, _, stderr := exec(tc.args...)
+			if code != exitUsage {
+				t.Errorf("exit code = %d, want %d", code, exitUsage)
+			}
+			if !strings.Contains(stderr, tc.want) {
+				t.Errorf("stderr does not mention %q:\n%s", tc.want, stderr)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsTheShippedSampleDeck(t *testing.T) {
+	code, stdout, stderr := exec("validate", "-deck-root", sampleDeck, "-theme-root", sampleThemes)
+	if code != exitOK {
+		t.Fatalf("exit code = %d, want %d\nstdout: %sstderr: %s", code, exitOK, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "no findings") {
+		t.Errorf("stdout does not report a clean deck:\n%s", stdout)
+	}
+}
+
+func TestValidateFailsLoudlyOnAMalformedDeck(t *testing.T) {
+	// examples/contract-fixture is deliberately broken; make validate-selftest
+	// asserts every rule fires, this just proves the subcommand reports at
+	// least one of them and exits non-zero.
+	code, stdout, stderr := exec("validate",
+		"-deck-root", "../../examples/contract-fixture",
+		"-theme-root", sampleThemes,
+	)
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d\nstderr: %s", code, exitError, stderr)
+	}
+	if !strings.Contains(stdout, "unknown-field") {
+		t.Errorf("stdout does not report the fixture's known violation:\n%s", stdout)
+	}
+}
+
+func TestValidateReportsAnUnloadableDeck(t *testing.T) {
+	code, _, stderr := exec("validate",
+		"-deck-root", "does/not/exist",
+		"-theme-root", sampleThemes,
+	)
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr, "deck.yaml") {
+		t.Errorf("stderr does not mention the deck: %s", stderr)
+	}
+}
+
+func TestValidateIsReachableFromDispatch(t *testing.T) {
+	code, _, _ := exec("validate", "-deck-root", t.TempDir(), "-theme-root", sampleThemes)
+	if code == exitUsage {
+		t.Error("validate is not wired into dispatch")
+	}
+}
+
+func TestBuildAbortsOnAContractViolation(t *testing.T) {
+	code, _, stderr := exec("build",
+		"-deck-root", "../../examples/contract-fixture",
+		"-theme-root", sampleThemes,
+		"-out", t.TempDir(),
+		"-formats", "html",
+	)
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d", code, exitError)
+	}
+	if !strings.Contains(stderr, "contract:") {
+		t.Errorf("stderr does not report a contract finding:\n%s", stderr)
+	}
+}
+
 func TestCheckIsReachableFromDispatch(t *testing.T) {
 	// Dispatch must route "check" somewhere; with no rendered deck it fails,
 	// which is enough to prove the verb is wired.
