@@ -317,6 +317,43 @@ func TestCheckPDFFlagFailsFastOnABadPath(t *testing.T) {
 	}
 }
 
+func TestCheckPDFFlagFailsFastWhenIndexIsMissing(t *testing.T) {
+	// comparePDFPages reads index.html itself before the browser launches, so
+	// a -dir with no rendered deck at all must fail here too, without Chrome.
+	dir := t.TempDir()
+	code, _, stderr := exec("check", "-dir", dir, "-pdf", filepath.Join(dir, "whatever.pdf"))
+	if code != exitError {
+		t.Errorf("exit code = %d, want %d\nstderr: %s", code, exitError, stderr)
+	}
+	if !strings.Contains(stderr, "index.html") {
+		t.Errorf("stderr does not name the missing index.html:\n%s", stderr)
+	}
+}
+
+func TestMergeFinding(t *testing.T) {
+	t.Run("nil extra is a no-op", func(t *testing.T) {
+		findings := []check.Finding{{Slide: 1, Rule: "overflow"}}
+		got := mergeFinding(findings, nil)
+		if len(got) != 1 {
+			t.Fatalf("len = %d, want 1", len(got))
+		}
+	})
+
+	t.Run("a non-nil extra is appended and the result stays sorted", func(t *testing.T) {
+		findings := []check.Finding{{Slide: 3, Rule: "overflow"}}
+		extra := &check.Finding{Slide: 0, Rule: check.RulePDFPages, Detail: "mismatch"}
+
+		got := mergeFinding(findings, extra)
+		if len(got) != 2 {
+			t.Fatalf("len = %d, want 2", len(got))
+		}
+		// Deck-level findings (slide 0) sort first.
+		if got[0].Rule != check.RulePDFPages || got[1].Rule != "overflow" {
+			t.Errorf("got = %+v, want pdf-pages before overflow", got)
+		}
+	})
+}
+
 func TestCheckIsReachableFromDispatch(t *testing.T) {
 	// Dispatch must route "check" somewhere; with no rendered deck it fails,
 	// which is enough to prove the verb is wired.

@@ -89,10 +89,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "check: %v\n", err)
 		return exitError
 	}
-	if pdfFinding != nil {
-		findings = append(findings, *pdfFinding)
-		check.SortFindings(findings)
-	}
+	findings = mergeFinding(findings, pdfFinding)
 
 	_, _ = fmt.Fprint(stdout, check.Report(findings))
 	if len(findings) > 0 {
@@ -111,4 +108,17 @@ func comparePDFPages(index, pdfPath string) (*check.Finding, error) {
 		return nil, fmt.Errorf("read %s: %w", index, err)
 	}
 	return check.ComparePDFPages(pdfPath, check.CountSlideSections(html))
+}
+
+// mergeFinding appends extra to findings, keeping them sorted, when extra is
+// not nil. It is its own function, pulled out of runCheck, so the merge that
+// runs after the one call in this file needing a real browser can be tested
+// on its own without one.
+func mergeFinding(findings []check.Finding, extra *check.Finding) []check.Finding {
+	if extra == nil {
+		return findings
+	}
+	findings = append(findings, *extra)
+	check.SortFindings(findings)
+	return findings
 }
