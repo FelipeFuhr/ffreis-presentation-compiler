@@ -311,7 +311,20 @@ Fatal rules: `unknown-layout`, `missing-field`, `unknown-field`,
 `missing-asset` (a `media`, or a chart/diagram `spec`/`data`, that does not
 exist on disk), `unsafe-path`, `invalid-field` (a malformed chart/diagram
 block, or an asset field that is not a non-empty string),
-`invalid-contract` (a theme's own `contract.yaml` fails to parse).
+`invalid-contract` (a theme's own `contract.yaml` fails to parse), `row-arity`
+(a `rows` list whose row lengths disagree with `columns`).
+
+**`row-arity` exists because a well-formed-looking table can still be wrong.**
+YAML splits a flow sequence on every top-level comma, so a decimal written
+with a comma — `9,8 milhões`, the Portuguese convention — inside an unquoted
+table cell silently becomes two cells, and every value after it in that row
+lands under the wrong header. The rendered table still fits the slide and
+reads as plausible numbers, so none of `check`'s measurements (overflow,
+contrast, tiny-type…) ever see a problem; only an arity check catches it.
+Quote any cell value that might contain a comma. The rule only looks at a
+`rows` element when it is itself a list — a layout that shapes rows as maps
+(one row per `{name, price, benefits}`, say) has no cell count to compare
+against `columns`, so it is skipped rather than flagged.
 
 **`undescribed-layout` is the one advisory rule, and the split matters.**
 Whether a layout exists is the *theme's* answer — `theme.LayoutNames()` —
@@ -350,7 +363,7 @@ path separator at all — it names a single subdirectory, never a path — which
 
 `make validate-selftest` renders `examples/contract-fixture` — a
 deliberately broken deck against the sample theme — and fails unless **all
-five rules fire**. Without it a validator that silently stopped catching one
+six rules fire**. Without it a validator that silently stopped catching one
 of them would look exactly like a clean deck.
 
 ## Commands

@@ -138,6 +138,7 @@ func validateSlide(s deck.Slide, c Contract, th *theme.Theme, provided map[strin
 	var findings []Finding
 	findings = append(findings, missingFields(s, layout)...)
 	findings = append(findings, fieldFindings(s, layout, deckRoot)...)
+	findings = append(findings, rowArityFindings(s)...)
 	return findings
 }
 
