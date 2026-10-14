@@ -260,6 +260,32 @@ two of them significant (32px and 60px of content silently cut).
   deck and theme — and fails unless **all eight rules fire**. Without it a checker
   that silently stopped working would look exactly like a clean deck.
 
+## Live preview (`serve`)
+
+`serve` renders the deck to a temporary directory, serves it over loopback
+HTTP, and re-renders plus reloads the browser when a source file changes.
+
+- **Binds to `127.0.0.1` by default, never `:8080`.** A deck is unpublished
+  client material; binding every interface would put it on the LAN by
+  default. `-addr 0.0.0.0:8080` opts in explicitly.
+- **Change detection polls an mtime/size fingerprint rather than using
+  fsnotify.** That adds no dependency, is immune to the editor-writes-via-
+  rename pattern that makes inotify miss some saves, and a deck is a few
+  dozen small files — a scan this cheap costs nothing at the poll interval.
+  A burst of changes from one save is coalesced by a debounce timer into one
+  rebuild.
+- **Live reload is a Server-Sent Events stream (`/__reload`) plus a bare
+  `EventSource`/`location.reload()` script**, needing no client-side
+  library. The script is injected into the served HTML at serve time only,
+  in `internal/serve` — `internal/render`'s output, and what `build` writes
+  to disk, stay byte-for-byte what ships.
+- **A failed re-render keeps serving the last good page with the error
+  overlaid**, rather than taking the server down — losing the whole preview
+  over a YAML typo mid-edit would make the tool useless.
+- The watch set is the deck root (`deck.yaml`, `slides/`, `assets/`,
+  `charts/`, `data/`) plus the one theme directory the deck currently
+  resolves to, so editing the theme reloads too.
+
 ## Contract (`validate`)
 
 `validate` checks a **loaded** deck against its theme's field vocabulary
@@ -267,9 +293,9 @@ before anything renders — `deck.Load` itself only fails on a missing
 `layout:` key, so without this stage a bad field reaches a Go template and
 produces either a blank region or a confusing template error three steps
 downstream. `build` runs the same check before generators and render, and
-aborts on findings; there is no flag to skip it. Both report every finding
-in one pass, naming the slide's source file and the offending key, not just
-the first problem.
+aborts on **fatal** findings; there is no flag to skip it. Both report every
+finding in one pass, naming the slide's source file and the offending key,
+not just the first problem.
 
 A theme's field vocabulary is declarative, the same idiom as `.Fields`
 itself: `internal/contract/contract.yaml` lists, per layout, the keys it
@@ -281,12 +307,27 @@ then a YAML change, not a Go change. A `chart:`/`diagram:` block is
 recognised on every layout unconditionally, the same way chrome keys are, so
 it is never part of a layout's own vocabulary.
 
-Rules: `unknown-layout` (names an available layout, from
-`theme.LayoutNames()`), `missing-field`, `unknown-field`, `missing-asset`
-(a `media`, or a chart/diagram `spec`/`data`, that does not exist on disk),
-`unsafe-path`, `invalid-field` (a malformed chart/diagram block, or an asset
-field that is not a non-empty string), `invalid-contract` (a theme's own
-`contract.yaml` fails to parse). Deliberately not implemented: a
+Fatal rules: `unknown-layout`, `missing-field`, `unknown-field`,
+`missing-asset` (a `media`, or a chart/diagram `spec`/`data`, that does not
+exist on disk), `unsafe-path`, `invalid-field` (a malformed chart/diagram
+block, or an asset field that is not a non-empty string),
+`invalid-contract` (a theme's own `contract.yaml` fails to parse).
+
+**`undescribed-layout` is the one advisory rule, and the split matters.**
+Whether a layout exists is the *theme's* answer — `theme.LayoutNames()` —
+never the contract's. Conflating the two shipped a validator that rejected
+every deck whose theme has more layouts than the compiler's own examples,
+with a report that read `theme "x" has no layout "table" (available: …
+table …)`: the decision came from the contract map while the message came
+from the theme. A theme is allowed to ship a layout with nothing but a
+template — that is the entire point of `.Fields` — so an undescribed layout
+costs field checking, not the build. It is reported once per layout rather
+than once per slide, names the `contract.yaml` path that would fix it, and
+`contract.Fatal` is what callers gate on. Skipping it silently instead
+would make the gate vacuous for exactly the themes that most need
+describing.
+
+Deliberately not implemented: a
 duplicate-slide-id check. Two slides sharing a title and layout is not an
 error — a consumer deck legitimately repeats slides — and detecting a
 duplicate by source basename alone could not be made precise without risking
@@ -318,6 +359,8 @@ of them would look exactly like a clean deck.
 go run ./cmd/ffreis-presentation-compiler build \
   -deck-root examples/sample-deck -theme-root examples/themes \
   -out dist -formats html,pdf
+go run ./cmd/ffreis-presentation-compiler serve \
+  -deck-root examples/sample-deck -theme-root examples/themes -addr 127.0.0.1:8080
 go run ./cmd/ffreis-presentation-compiler validate \
   -deck-root examples/sample-deck -theme-root examples/themes
 go run ./cmd/ffreis-presentation-compiler doctor
@@ -372,6 +415,7 @@ internal/engine/                   Renderer port, Runner, PDF/PNG/PPTX adapters
 internal/engine/chrome/            CDP client, shared by check + adapters
 internal/engine/pptx/              OOXML writer (assets/ holds the static parts)
 internal/gen/                      generator hook (charts, diagrams) + cache
+internal/serve/                    live-reload preview: render/watch/HTTP loop
 internal/seo/                      head meta, schema.org, sitemap, robots (leaf)
 internal/logx/                     slog construction
 examples/sample-deck/              brand-free fixture deck
@@ -384,9 +428,9 @@ examples/contract-fixture/         deliberately broken deck, for validate-selfte
 ## Roadmap
 
 Implemented: content model, theme + layouts, HTML, PDF, PNG, PPTX (image mode),
-the generator hook, `check` (all eight rules, including `overlap` and
-`pdf-pages`), `validate`, the SEO surface, `doctor`, and five self-tests.
-Next, in order: `serve --watch`; golden images; model-assisted review.
+the generator hook, `check` (all eight rules), `validate`, the SEO surface,
+`serve`, `doctor`, and five self-tests. Next, in order: golden images;
+model-assisted review.
 
 ## Keeping this file current
 
