@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"net/url"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -45,6 +46,39 @@ func TestFileURLRoundTrips(t *testing.T) {
 				t.Errorf("FileURL(%q) = %q, parsed back to path %q", abs, got, parsed.Path)
 			}
 		})
+	}
+}
+
+// TestFileURLWrapsAnAbsFailure forces filepath.Abs's only failure mode —
+// os.Getwd() erroring — by chdir'ing into an empty directory and removing it
+// out from under the process, then calling FileURL with a relative path.
+//
+// This is exercised directly against FileURL rather than through any of its
+// callers (the PDF/PNG/PPTX adapters, the check subcommand) because every one
+// of them calls os.Stat or filepath.Abs on the same path *before* reaching
+// FileURL; with a dead working directory that earlier call fails for the
+// identical reason first, so the caller's own FileURL-error branch can never
+// be reached from outside the package. Verified empirically, not assumed:
+// with cwd removed, `os.Stat("x")` itself already returns
+// `stat x: no such file or directory` before FileURL's internal
+// `filepath.Abs` is ever reached.
+func TestFileURLWrapsAnAbsFailure(t *testing.T) {
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+
+	dead := t.TempDir()
+	if err := os.Chdir(dead); err != nil {
+		t.Fatalf("chdir into %s: %v", dead, err)
+	}
+	if err := os.Remove(dead); err != nil {
+		t.Fatalf("remove the working directory out from under the process: %v", err)
+	}
+
+	if _, err := engine.FileURL("relative/index.html"); err == nil {
+		t.Fatal("want an error when the working directory no longer exists")
 	}
 }
 
