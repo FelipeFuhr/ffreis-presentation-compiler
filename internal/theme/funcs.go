@@ -16,6 +16,7 @@ func FuncMap() template.FuncMap {
 		"list":     list,
 		"rows":     rows,
 		"add":      func(a, b int) int { return a + b },
+		"seq":      seq,
 		"default":  defaultValue,
 		"safeHTML": func(s string) template.HTML { return template.HTML(s) }, //nolint:gosec // theme-authored markup, same trust boundary as the template itself
 	}
@@ -86,4 +87,25 @@ func defaultValue(fallback, v any) any {
 		return fallback
 	}
 	return v
+}
+
+// MaxSeq caps `seq` so a typo in a layout cannot ask for a billion-cell grid
+// and take the build down with it. A template grid is a Gantt's months or a
+// rating scale; nothing legitimate comes near this.
+const MaxSeq = 1000
+
+// seq returns the integers lo..hi inclusive, so a layout can lay out a fixed
+// grid — a 12-month Gantt, a scale — without the deck repeating the column
+// list in YAML on every row. Returns nil for an inverted or oversized range
+// rather than erroring: a template that silently renders no cells is easier
+// to spot than one that aborts the whole build.
+func seq(lo, hi int) []int {
+	if hi < lo || hi-lo+1 > MaxSeq {
+		return nil
+	}
+	out := make([]int, 0, hi-lo+1)
+	for i := lo; i <= hi; i++ {
+		out = append(out, i)
+	}
+	return out
 }

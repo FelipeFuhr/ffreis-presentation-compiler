@@ -75,3 +75,32 @@ func TestGetOnNilMapIsSafe(t *testing.T) {
 		t.Errorf("get on a nil map = %q, want empty", got)
 	}
 }
+
+func TestSeqBuildsAnInclusiveRange(t *testing.T) {
+	got := render(t, `{{ range seq 1 5 }}{{ . }},{{ end }}`, nil)
+	if got != "1,2,3,4,5," {
+		t.Errorf("seq 1 5 = %q", got)
+	}
+}
+
+func TestSeqRefusesRangesThatCannotBeMeant(t *testing.T) {
+	// nil, not an error: a grid that renders no cells is obvious on the slide,
+	// whereas aborting the build hides which layout asked for it.
+	cases := map[string]string{
+		"inverted":  `{{ range seq 5 1 }}x{{ end }}`,
+		"oversized": `{{ range seq 1 100000 }}x{{ end }}`,
+	}
+	for name, tpl := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := render(t, tpl, nil); got != "" {
+				t.Errorf("want no cells, got %q", got)
+			}
+		})
+	}
+}
+
+func TestSeqOfOne(t *testing.T) {
+	if got := render(t, `{{ range seq 3 3 }}{{ . }}{{ end }}`, nil); got != "3" {
+		t.Errorf("seq 3 3 = %q", got)
+	}
+}

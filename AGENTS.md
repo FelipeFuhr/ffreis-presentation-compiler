@@ -86,6 +86,23 @@ whole deck.
   (0.14in = 13.44px); a stack of them accumulated the rounding that
   `-overflow-tolerance-px` exists to absorb.
 
+## Template functions (`internal/theme`)
+
+Layouts get a small FuncMap: `get`, `str`, `int`, `list`, `rows`, `add`,
+`default` and `seq`.
+
+`seq lo hi` returns the inclusive integer range, so a layout can lay out a
+fixed grid — a 12-month Gantt, a rating scale — without the deck repeating
+the column list in YAML on every row. It returns **nil** for an inverted or
+oversized range (`MaxSeq`, 1000) rather than erroring: a grid that renders no
+cells is obvious on the slide, where aborting the build hides which layout
+asked for it.
+
+A layout indexing into an optional span must guard it. `index` on an empty
+slice aborts the render, so the Gantt layout defaults its bounds to `0`/`-1`
+and only reads the span when it has two entries — an activity with no dates
+yet then renders empty tracks instead of failing the build.
+
 ## Generator hook (charts and diagrams)
 
 A slide can declare `chart:` (or its alias `diagram:`) instead of a `media:`
