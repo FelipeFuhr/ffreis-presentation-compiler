@@ -26,6 +26,11 @@ const DefaultTimeout = 90 * time.Second
 // Client runs actions against a page.
 type Client struct {
 	Timeout time.Duration
+
+	// launch performs one browser session. It is a field so a test can drive
+	// the retry loop below without a browser — the same injectable-boundary
+	// trick as engine.LookPath. nil means runOnce, the real thing.
+	launch func(ctx context.Context, pageURL string, acts ...chromedp.Action) error
 }
 
 // New returns a client with the default timeout.
@@ -63,9 +68,14 @@ const LaunchAttempts = 2
 // the caller's — a bad selector, a script that threw — and repeating it would
 // just produce the same error more slowly.
 func (c *Client) run(ctx context.Context, pageURL string, acts ...chromedp.Action) error {
+	launch := c.launch
+	if launch == nil {
+		launch = c.runOnce
+	}
+
 	var err error
 	for attempt := 1; attempt <= LaunchAttempts; attempt++ {
-		err = c.runOnce(ctx, pageURL, acts...)
+		err = launch(ctx, pageURL, acts...)
 		if err == nil || ctx.Err() != nil || !isLaunchFailure(err) {
 			return err
 		}
