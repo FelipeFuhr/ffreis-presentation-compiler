@@ -11,6 +11,7 @@ package chrome
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/emulation"
@@ -25,6 +26,11 @@ const DefaultTimeout = 90 * time.Second
 // Client runs actions against a page.
 type Client struct {
 	Timeout time.Duration
+
+	// launch performs one browser session. It is a field so a test can drive
+	// the retry loop below without a browser — the same injectable-boundary
+	// trick as engine.LookPath. nil means runOnce, the real thing.
+	launch func(ctx context.Context, pageURL string, acts ...chromedp.Action) error
 }
 
 // New returns a client with the default timeout.
@@ -37,12 +43,58 @@ func (c *Client) timeout() time.Duration {
 	return c.Timeout
 }
 
-// run opens a browser, navigates to pageURL, waits for fonts, then runs acts.
+// runOnce opens a browser, navigates to pageURL, waits for fonts, then runs
+// acts.
 //
 // Waiting on document.fonts.ready is load-bearing for both callers: measuring
 // or capturing before the web font loads uses the fallback's metrics, which is
 // precisely the drift this tooling exists to catch.
+// LaunchAttempts is how many times a run will start a browser before giving
+// up. A cold hosted runner regularly fails the first launch with "websocket
+// url timeout reached" — Chrome is still coming up when chromedp stops
+// waiting — and that failure is entirely transient: the identical command
+// succeeds moments later. Twice it took down a deck build that was correct,
+// which is how a green CI stops being believed.
+//
+// Two, not more: a browser that cannot start for a real reason (not
+// installed, no sandbox permissions) should fail fast with that reason
+// rather than make the operator wait through a retry storm for the same
+// message.
+const LaunchAttempts = 2
+
+// run opens a browser and performs acts, retrying a failed *launch* once.
+//
+// Only the launch is retried. Once the page is up, a failure is the page's or
+// the caller's — a bad selector, a script that threw — and repeating it would
+// just produce the same error more slowly.
 func (c *Client) run(ctx context.Context, pageURL string, acts ...chromedp.Action) error {
+	launch := c.launch
+	if launch == nil {
+		launch = c.runOnce
+	}
+
+	var err error
+	for attempt := 1; attempt <= LaunchAttempts; attempt++ {
+		err = launch(ctx, pageURL, acts...)
+		if err == nil || ctx.Err() != nil || !isLaunchFailure(err) {
+			return err
+		}
+	}
+	return err
+}
+
+// isLaunchFailure reports whether err is the transient browser-startup
+// failure rather than something the page did.
+//
+// Matching on the message is unpleasant, but chromedp returns a plain
+// errors.New for this and offers no sentinel to compare against; a typed
+// check would silently stop matching the day they reword it, whereas this
+// degrades to the old behaviour of failing once.
+func isLaunchFailure(err error) bool {
+	return strings.Contains(err.Error(), "websocket url timeout reached")
+}
+
+func (c *Client) runOnce(ctx context.Context, pageURL string, acts ...chromedp.Action) error {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,

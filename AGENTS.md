@@ -512,6 +512,16 @@ make doctor            # which adapters are available here
   and files, never decks, themes or layouts. That is what would let it become
   the fleet's shared `html-render` capability, with `ffreis-resume` dropping its
   own `scripts/pdf.sh` in favour of it.
+- **A failed browser *launch* is retried once** (`chrome.LaunchAttempts`). A
+  cold CI runner regularly fails the first attempt with "websocket url
+  timeout reached" — Chrome is still coming up when chromedp stops waiting —
+  and the identical command succeeds moments later. It took down two correct
+  deck builds before being fixed, which is how a green CI stops being
+  believed. Only the launch retries: once the page is up, a failure belongs
+  to the page or the caller and repeating it just produces the same error
+  more slowly. The predicate matches on chromedp's message because it
+  returns a plain `errors.New` with no sentinel; if they reword it this
+  degrades to the old fail-once behaviour rather than misfiring.
 - Chrome flags follow `ffreis-resume/scripts/pdf.sh`: `--no-sandbox` and
   `--disable-dev-shm-usage` are what make the PDF path work inside CI containers
   and `act`.
