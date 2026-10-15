@@ -144,9 +144,18 @@ func validateSlide(s deck.Slide, c Contract, th *theme.Theme, provided map[strin
 
 // missingFields reports each field the layout requires but the slide does
 // not set.
+//
+// A chart/diagram block satisfies `media`. The generator writes the image and
+// sets that field, but it runs AFTER this stage — so requiring the key here
+// would reject every generated slide for not yet having what the next step
+// produces. The declaration the author actually made is the chart block.
 func missingFields(s deck.Slide, layout Layout) []Finding {
+	generated := hasSpec(s)
 	var findings []Finding
 	for _, name := range layout.Required {
+		if name == gen.MediaKey && generated {
+			continue
+		}
 		if _, ok := s.Fields[name]; !ok {
 			findings = append(findings, Finding{
 				Slide: s.Number, Source: s.Source, Rule: RuleMissingField, Key: name, Fatal: true,
@@ -178,6 +187,16 @@ func fieldFindings(s deck.Slide, layout Layout, deckRoot string) []Finding {
 		}
 	}
 	return findings
+}
+
+// hasSpec reports whether the slide declares a chart/diagram block.
+func hasSpec(s deck.Slide) bool {
+	for _, k := range gen.SpecKeys {
+		if _, ok := s.Fields[k]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func isSpecKey(key string) bool {

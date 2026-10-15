@@ -400,3 +400,70 @@ func TestRowArityDetailIsGrammatical(t *testing.T) {
 		t.Errorf("an extra-cells detail does not name the comma cause: %q", plural)
 	}
 }
+
+// themeRequiringMedia builds a theme whose own contract makes `media`
+// required for hero-media — the shape a real brand theme uses, and the one
+// the sample theme deliberately does not.
+func themeRequiringMedia(t *testing.T) *theme.Theme {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "strict")
+	if err := os.CopyFS(dir, os.DirFS(filepath.Join(sampleThemes, "sample"))); err != nil {
+		t.Fatalf("copy the sample theme: %v", err)
+	}
+	contractYAML := "layouts:\n  hero-media:\n    required: [media, alt]\n    allowed: [caption]\n"
+	if err := os.WriteFile(filepath.Join(dir, "contract.yaml"), []byte(contractYAML), 0o600); err != nil {
+		t.Fatalf("write contract: %v", err)
+	}
+	th, err := theme.Load(root, "strict")
+	if err != nil {
+		t.Fatalf("theme.Load: %v", err)
+	}
+	return th
+}
+
+// TestChartBlockSatisfiesARequiredMedia locks the ordering that made this a
+// bug: the generator writes `media` and sets the field, but it runs AFTER
+// validation, so a layout requiring `media` rejected every generated slide
+// for not yet having what the next stage produces.
+func TestChartBlockSatisfiesARequiredMedia(t *testing.T) {
+	th := themeRequiringMedia(t)
+	deckRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(deckRoot, "spec.py"), []byte("#"), 0o600); err != nil {
+		t.Fatalf("seed a spec: %v", err)
+	}
+
+	d := &deck.Deck{Slides: []deck.Slide{{
+		Number: 1, Source: "s.md", Layout: "hero-media",
+		Fields: map[string]any{
+			"alt":   "a generated diagram",
+			"chart": map[string]any{"generator": "python", "spec": "spec.py"},
+		},
+	}}}
+
+	for _, f := range contract.Validate(d, th, deckRoot) {
+		if f.Rule == contract.RuleMissingField && f.Key == "media" {
+			t.Errorf("a chart block did not satisfy the required media: %+v", f)
+		}
+	}
+}
+
+// TestMissingMediaIsStillReportedWithoutAChart is the other half: the
+// exemption must not turn the rule off for slides that genuinely forgot it.
+func TestMissingMediaIsStillReportedWithoutAChart(t *testing.T) {
+	th := themeRequiringMedia(t)
+	d := &deck.Deck{Slides: []deck.Slide{{
+		Number: 1, Source: "s.md", Layout: "hero-media",
+		Fields: map[string]any{"alt": "no image and no chart"},
+	}}}
+
+	var found bool
+	for _, f := range contract.Validate(d, th, t.TempDir()) {
+		if f.Rule == contract.RuleMissingField && f.Key == "media" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a slide with neither media nor a chart must still be reported")
+	}
+}
