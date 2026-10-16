@@ -39,7 +39,7 @@ func parseParityOptions(args []string, stderr io.Writer) (*parityOptions, error)
 	return &o, nil
 }
 
-// runParity OCRs a deck's own rendered slide PNGs and compares the result
+// runParity OCRs a deck's own rendered slide PNG files and compares the result
 // against the deck's authored source, so a dropped section or annotation is
 // a build-time finding rather than something only a line-by-line read
 // catches. Advisory by convention the same way `review` is: it needs an

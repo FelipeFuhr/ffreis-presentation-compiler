@@ -12,9 +12,9 @@ import (
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/parity"
 )
 
-// writeSlidePNGs writes one placeholder PNG per slide number under dir, named
+// writeSlidePNGFiles writes one placeholder PNG per slide number under dir, named
 // the way internal/engine's PNG renderer names them.
-func writeSlidePNGs(t *testing.T, dir string, numbers ...int) {
+func writeSlidePNGFiles(t *testing.T, dir string, numbers ...int) {
 	t.Helper()
 	for _, n := range numbers {
 		path := filepath.Join(dir, fmtSlide(n))
@@ -54,7 +54,7 @@ func fixedRunner(text string) parity.Runner {
 
 func TestCompareDeckFindsNoMissingWordsWhenOCRMatchesTheSource(t *testing.T) {
 	dir := t.TempDir()
-	writeSlidePNGs(t, dir, 1)
+	writeSlidePNGFiles(t, dir, 1)
 	d := &deck.Deck{Slides: []deck.Slide{
 		{Number: 1, Source: "01.md", Title: "Carta de Projeto", Kicker: "Definição"},
 	}}
@@ -70,7 +70,7 @@ func TestCompareDeckFindsNoMissingWordsWhenOCRMatchesTheSource(t *testing.T) {
 
 func TestCompareDeckReportsWordsDroppedFromTheRender(t *testing.T) {
 	dir := t.TempDir()
-	writeSlidePNGs(t, dir, 1)
+	writeSlidePNGFiles(t, dir, 1)
 	// The exact shape of this week's real findings: a slide's source names a
 	// section ("equipe") that OCR of the actual render never shows.
 	d := &deck.Deck{Slides: []deck.Slide{
@@ -106,7 +106,7 @@ func TestMissingRatioIsZeroWithNoExpectedWords(t *testing.T) {
 }
 
 func TestCompareDeckFailsLoudlyOnAMissingPNG(t *testing.T) {
-	dir := t.TempDir() // no PNGs written
+	dir := t.TempDir() // no PNG files written
 	d := &deck.Deck{Slides: []deck.Slide{{Number: 1, Source: "01.md", Title: "Title"}}}
 
 	_, err := parity.CompareDeck(context.Background(), fixedRunner(""), d, dir, "eng")
@@ -117,7 +117,7 @@ func TestCompareDeckFailsLoudlyOnAMissingPNG(t *testing.T) {
 
 func TestCompareDeckPropagatesAnOCRFailure(t *testing.T) {
 	dir := t.TempDir()
-	writeSlidePNGs(t, dir, 1)
+	writeSlidePNGFiles(t, dir, 1)
 	d := &deck.Deck{Slides: []deck.Slide{{Number: 1, Source: "01.md", Title: "Title"}}}
 
 	failing := func(context.Context, []byte, string) (string, error) { return "", errors.New("tesseract exploded") }

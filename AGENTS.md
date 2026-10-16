@@ -388,7 +388,7 @@ template funcs coerce YAML into.
   failure mode for a check that is already approximate.
 - **Advisory, like `review`:** needs an external tool (`doctor` reports it,
   same as the generator hook's python/mermaid/d2), and a missing-word count
-  is a prompt to look, not proof of a defect — OCR of real deck PNGs scored
+  is a prompt to look, not proof of a defect — OCR of real deck PNG files scored
   0/N missing across the entire shipped example on first run, confirmed by
   deliberately editing a slide's source without re-rendering and watching
   `parity` name every word the stale PNG was missing.
@@ -623,7 +623,7 @@ internal/pathsafe/                 the one path-containment helper, shared by th
 internal/render/                   document shell + slide assembly (base.gohtml)
 internal/check/                    measured checks (probe.js)
 internal/golden/                   perceptual PNG diff for visual regression
-internal/parity/                   OCR content-parity: rendered PNG vs. authored source
+internal/parity/                   OCR content-parity: rendered PNG vs. source
 internal/metrics/                  per-slide layout metrics for review (metrics.js)
 internal/engine/                   Renderer port, Runner, PDF/PNG/PPTX adapters
 internal/engine/chrome/            CDP client, shared by check + adapters

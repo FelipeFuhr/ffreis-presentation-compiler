@@ -75,7 +75,7 @@ commands:
   check     measure a rendered deck: overflow, out-of-bounds, tiny-type,
             contrast, missing-asset, font-fallback, overlap, pdf-pages
   golden    compare freshly rendered slide PNG files against an approved baseline
-  parity    OCR rendered slide PNGs and report words missing from the source
+  parity    OCR rendered slide PNG files and report words missing from the source
   metrics   extract per-slide layout metrics (box geometry, density, palette…)
   serve     render, serve over loopback HTTP, and reload on source changes
   doctor    report which render adapters are available on this machine

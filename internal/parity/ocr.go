@@ -1,4 +1,4 @@
-// Package parity OCRs a deck's own rendered slide PNGs and compares the
+// Package parity OCRs a deck's own rendered slide PNG files and compares the
 // recognised text against the deck's authored source — kicker, title, body
 // prose, and every string in a layout's own fields — so a section or a short
 // annotation dropped during authoring or a port shows up as a build-time
