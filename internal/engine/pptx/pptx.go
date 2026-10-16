@@ -44,8 +44,22 @@ type Slide struct {
 type Deck struct {
 	WidthIn  float64
 	HeightIn float64
-	Slides   []Slide
+	// Lang is the document's BCP 47 language tag, stamped on every speaker-notes
+	// run. Empty falls back to DefaultNotesLang.
+	Lang   string
+	Slides []Slide
 }
+
+// DefaultNotesLang is the language tag used when a deck names none. It only
+// sets PowerPoint's spell-check language for the notes pane, so the fallback
+// is cosmetic — but it must be a real tag, because the zero value would write
+// lang="" into the XML.
+//
+// There is deliberately no consumer's language here: a hardcoded pt-BR was
+// one deck repo's language baked into a public, consumer-agnostic compiler,
+// which is exactly what the -deck-root/-theme-root discipline exists to
+// avoid. The language belongs to the content.
+const DefaultNotesLang = "en"
 
 // Write serialises the deck to a .pptx at dst.
 //
@@ -145,7 +159,7 @@ func writeParts(z *zip.Writer, d Deck) error {
 			part{fmt.Sprintf("ppt/media/slide%d.png", n), s.PNG},
 			part{fmt.Sprintf("ppt/slides/slide%d.xml", n), []byte(slideXML(n, d))},
 			part{fmt.Sprintf("ppt/slides/_rels/slide%d.xml.rels", n), []byte(slideRels(n))},
-			part{fmt.Sprintf("ppt/notesSlides/notesSlide%d.xml", n), []byte(notesXML(s.Notes))},
+			part{fmt.Sprintf("ppt/notesSlides/notesSlide%d.xml", n), []byte(notesXML(s.Notes, d.Lang))},
 			part{fmt.Sprintf("ppt/notesSlides/_rels/notesSlide%d.xml.rels", n), []byte(notesRels(n))},
 		)
 	}
@@ -319,11 +333,15 @@ func slideRels(n int) string {
 `, n, n)
 }
 
-func notesXML(notes string) string {
+func notesXML(notes, lang string) string {
+	if strings.TrimSpace(lang) == "" {
+		lang = DefaultNotesLang
+	}
 	var paras strings.Builder
 	lines := strings.Split(strings.TrimSpace(notes), "\n")
 	for _, line := range lines {
-		fmt.Fprintf(&paras, `<a:p><a:r><a:rPr lang="pt-BR" dirty="0"/><a:t>%s</a:t></a:r></a:p>`, escape(line))
+		fmt.Fprintf(&paras, `<a:p><a:r><a:rPr lang="%s" dirty="0"/><a:t>%s</a:t></a:r></a:p>`,
+			escape(lang), escape(line))
 	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:notes xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"

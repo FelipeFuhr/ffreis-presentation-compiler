@@ -136,7 +136,12 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
 		return exitError
 	}
-	job := engine.Job{IndexPath: index, OutDir: opts.out, Slug: opts.slug, Size: size}
+	job := engine.Job{
+		IndexPath: index, OutDir: opts.out, Slug: opts.slug, Size: size,
+		// Resolved, not the raw flag: the deck's own lang: is what an export
+		// should carry when the invocation names none.
+		Lang: d.Language(opts.lang),
+	}
 	paths, err := renderFormats(context.Background(), formats, job, speakerNotes(d), stdout)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)

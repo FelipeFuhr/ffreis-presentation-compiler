@@ -242,14 +242,14 @@ validate-selftest: ## Prove the validator is not vacuous: the broken fixture mus
 	@out=$$(go run ./cmd/$(BINARY) validate -deck-root "$(CONTRACT_FIXTURE)" \
 		-theme-root "$(EXAMPLE_THEMES)" 2>&1 || true); \
 	missing=""; \
-	for rule in unknown-layout missing-field unknown-field missing-asset unsafe-path row-arity; do \
+	for rule in unknown-layout missing-field unknown-field invalid-field missing-asset unsafe-path row-arity; do \
 		echo "$$out" | grep -q "$$rule" || missing="$$missing $$rule"; \
 	done; \
 	if [ -n "$$missing" ]; then \
 		echo "validate-selftest: the fixture did not trigger:$$missing" >&2; \
 		echo "$$out" >&2; exit 1; \
 	fi; \
-	echo "validate-selftest: ok — all 6 rules fired on the broken fixture"
+	echo "validate-selftest: ok — all 7 rules fired on the broken fixture"
 
 export-selftest: ## Prove the PPTX actually opens: round-trip it through LibreOffice
 	@command -v soffice >/dev/null 2>&1 || { echo "export-selftest: soffice not installed — skipping" >&2; exit 0; }

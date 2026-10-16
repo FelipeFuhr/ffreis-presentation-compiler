@@ -244,6 +244,19 @@ not the invocation. The previous default was `pt-BR` — one consumer's language
 baked into a public, consumer-agnostic compiler, which is exactly what the
 `-deck-root`/`-theme-root` discipline exists to avoid.
 
+**That default left residue in two places, both since removed, and the shape
+of the leak is worth recognising.** `serve`'s own `-lang` still defaulted to
+`pt-BR`; because `render.Render` resolves its `Options.Lang` through
+`deck.Language`, a non-empty default there *overrode* every deck's own `lang:`
+on every preview — the one case where the flag wins. And the PPTX
+speaker-notes writer stamped `lang="pt-BR"` on every run of text. Both now
+take the resolved value: `build` puts it on `engine.Job.Lang` (a property of
+the document being exported, like `Size`), and `pptx` falls back to
+`pptx.DefaultNotesLang` when a deck names none, because the zero value would
+write `lang=""` into the XML. The notes tag only sets PowerPoint's
+spell-check language for the notes pane, which is exactly why it survived
+unnoticed: a leak with no visible symptom is the kind a test has to hold.
+
 ## Checks (`check`)
 
 `check` measures a **rendered** deck over CDP — it reads `dist/index.html`
@@ -478,9 +491,23 @@ it is never part of a layout's own vocabulary.
 Fatal rules: `unknown-layout`, `missing-field`, `unknown-field`,
 `missing-asset` (a `media`, or a chart/diagram `spec`/`data`, that does not
 exist on disk), `unsafe-path`, `invalid-field` (a malformed chart/diagram
-block, or an asset field that is not a non-empty string),
+block, or an asset field or `alt` that is not a non-empty string),
 `invalid-contract` (a theme's own `contract.yaml` fails to parse), `row-arity`
 (a `rows` list whose row lengths disagree with `columns`).
+
+**`required` is key presence, which is why `alt` needed its own rule.**
+`alt: ""` — and `alt: "   "` — satisfied `required: [alt]` silently, so a
+layout whose image *is* the slide's content could ship with no accessible
+name, and no `check` rule covers alt quality either (`missing-asset` fires on
+a failed load, never on the text). An empty alt is correct markup only for a
+decorative image, and a theme writes that into its own template — the sample
+theme's badge does — so it is never something a deck author declares. The
+emptiness test is one primitive, `textFinding`, shared with the asset fields
+rather than copied: `media`, a chart's `spec`/`data` and `alt` all answer the
+same question. The check sits **after** the unknown-field case in the field
+switch on purpose; checking alt's content first would exempt the key from the
+vocabulary check on every layout that never declared it
+(`TestValidateStillReportsAnAltTheLayoutDoesNotDeclare`).
 
 **`row-arity` exists because a well-formed-looking table can still be wrong.**
 YAML splits a flow sequence on every top-level comma, so a decimal written
@@ -547,7 +574,7 @@ path separator at all — it names a single subdirectory, never a path — which
 
 `make validate-selftest` renders `examples/contract-fixture` — a
 deliberately broken deck against the sample theme — and fails unless **all
-six rules fire**. Without it a validator that silently stopped catching one
+seven rules fire**. Without it a validator that silently stopped catching one
 of them would look exactly like a clean deck.
 
 ## Commands
@@ -564,7 +591,7 @@ go run ./cmd/ffreis-presentation-compiler doctor
 
 make build             # render the example deck (override DECK= THEMES= OUT= FORMATS=)
 make validate-deck     # check the example deck's contract (override DECK= THEMES=)
-make validate-selftest # prove the validator still catches all six rules
+make validate-selftest # prove the validator still catches all seven rules
 make smoke-check       # end-to-end render + pagination assertion
 make check             # render the example deck and measure it
 make check-selftest    # prove the checker still catches all eight rules
@@ -577,6 +604,29 @@ make metrics           # extract per-slide layout metrics as JSON
 make review            # metrics + a model's advisory critique (always exits 0)
 make doctor            # which adapters are available here
 ```
+
+## Declared quality gates (`flags/flags.json`)
+
+`flags/flags.json` is this repo's flag registry: every deliberate point of
+variation declared once, in the fleet's schema
+(`ffreis-platform-standards/flags/flag-registry.schema.json`). Four
+`category: quality` gates are declared here — `font-integrity`,
+`image-alt-meaningful`, `contrast-aa`, `output-gate-exists` — each
+`default: "error"` with a `seam` naming the code that actually fails.
+
+**The `exceptions` entries are the load-bearing part, not boilerplate.** A
+gate that is enforcing *except* in one reasoned case looks identical to an
+oversight from outside the code; an exception with a real `reason` is what
+turns a considered trade-off into something a reader can audit. The four
+recorded here are the font rule skipping families with no `@font-face` (a
+system stack the theme chose), the alt rule being blind to a template that
+hard-codes an `<img>` its contract never declares, the contrast rule
+computing against the nearest background *colour* when the real backdrop is
+an image or gradient, and `output-gate-exists` not covering visual regression
+because the golden baselines cannot be committed (see the `golden` section).
+No `browser-live` target is declared: HTML, PDF, PNG and PPTX are all batch
+outputs, and `serve` is an authoring preview whose injected script is a
+nine-line live-reload stub with no interaction handlers.
 
 ## Non-obvious facts
 
@@ -638,13 +688,14 @@ examples/themes/sample/            brand-free fixture theme
 examples/check-fixture/            deliberately broken deck, for check-selftest
 examples/themes/check-fixture/     deliberately broken theme, ditto
 examples/contract-fixture/         deliberately broken deck, for validate-selftest
+flags/flags.json                   declared points of variation (the quality gates)
 ```
 
 ## Roadmap
 
 Implemented: content model, theme + layouts, HTML, PDF, PNG, PPTX (image mode),
 the generator hook (python, cmd, mermaid, d2), CSV-sourced table rows
-(`rows_csv`), `check` (all eight rules), `validate` (all six rules), the SEO
+(`rows_csv`), `check` (all eight rules), `validate` (all seven rules), the SEO
 surface, `serve`, `doctor`, five self-tests, golden images
 (`golden`/`golden-update`), OCR content parity (`parity`), and model-assisted
 review (`metrics`/`review`).

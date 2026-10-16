@@ -73,7 +73,7 @@ func (r *PPTXRenderer) Render(ctx context.Context, job Job) (string, error) {
 		return "", fmt.Errorf("pptx: %w", err)
 	}
 
-	deck := pptx.Deck{WidthIn: job.Size.WidthIn, HeightIn: job.Size.HeightIn}
+	deck := pptx.Deck{WidthIn: job.Size.WidthIn, HeightIn: job.Size.HeightIn, Lang: job.Lang}
 	for _, shot := range shots {
 		deck.Slides = append(deck.Slides, pptx.Slide{PNG: shot.PNG, Notes: r.Notes[shot.Index]})
 	}
