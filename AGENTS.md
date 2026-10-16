@@ -132,7 +132,20 @@ sample theme and cyan in a brand theme, with no edit.
 Output is content-addressed under `<out>/generated/<hash>.svg`; the key covers
 the spec, the data **and** the tokens, so changing the theme regenerates charts
 rather than serving a stale one. A generator that exits 0 without writing a
-non-empty file is treated as a failure, not a no-op.
+legitimate artifact is treated as a failure, not a no-op — and not cached as
+one either: `Resolve` deletes whatever it wrote before returning the error, so
+a broken artifact never survives at its own content-hash path to be served to
+the next build with identical inputs.
+
+**"Legitimate" is `gen.validateArtifact`, two checks deep.** First, size:
+`gen.MinArtifactBytes` (256) rejects anything smaller, which an `<svg/>` root
+with no children — a generator that crashed before drawing anything but still
+exited 0 — cannot clear; a real chart or diagram runs into the thousands of
+bytes. Second, format: for `svg`, the bytes must contain both `<svg` and
+`</svg>`; for `png`, they must start with the 8-byte PNG signature. Both
+checks are deliberately shallow — this is catching a crashed or
+misconfigured generator, not judging a trusted tool's output byte for byte,
+which is what `parity` (below) exists for instead.
 
 `mermaid` is registered but does not receive `--tokens` — `mmdc` themes through
 its own config, so diagrams inherit the brand less automatically than python
