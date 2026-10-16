@@ -6,6 +6,8 @@ import (
 	"io"
 
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine"
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/gen"
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/parity"
 )
 
 // runDoctor reports adapter availability so a missing browser is diagnosed
@@ -29,6 +31,23 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 		}
 		_, _ = fmt.Fprintf(stdout, "%-7s %-21s %s\n", r.Format(), r.Tool(), status)
 	}
+
+	_, _ = fmt.Fprintln(stdout, "\ngenerator tool                  status")
+	registry := gen.DefaultRegistry()
+	for _, name := range registry.Names() {
+		status := "ok"
+		if !registry[name].Available() {
+			status = "optional, not installed"
+		}
+		_, _ = fmt.Fprintf(stdout, "%-9s %-21s %s\n", name, registry[name].Tool(), status)
+	}
+
+	_, _ = fmt.Fprintln(stdout, "\ncheck     tool                  status")
+	parityStatus := "ok"
+	if !parity.Available() {
+		parityStatus = "optional, not installed"
+	}
+	_, _ = fmt.Fprintf(stdout, "%-9s %-21s %s\n", "parity", parity.Tool, parityStatus)
 
 	if !allReady {
 		_, _ = fmt.Fprintln(stdout, "\nhtml always works; install the tools above for the other formats.")

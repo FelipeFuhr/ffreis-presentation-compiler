@@ -57,6 +57,17 @@ type Generator interface {
 // Runner executes an external command; injected so tests need no toolchain.
 type Runner func(ctx context.Context, name string, args ...string) error
 
+// TokenInjector is implemented by a generator whose tool has no runtime flag
+// for custom colours, so tokens can only reach it by rewriting the spec file
+// itself before invocation. Resolve calls this, when the chosen generator
+// implements it, on a cache miss only — spec/data bytes and tokensJSON are
+// still what the cache key hashes (see fingerprint), so this never changes
+// what counts as a cache hit, only what gets written to disk and handed to
+// Command on a miss.
+type TokenInjector interface {
+	InjectTokens(spec []byte, tokens map[string]string) ([]byte, error)
+}
+
 // Registry maps generator names to implementations.
 type Registry map[string]Generator
 
@@ -66,6 +77,7 @@ func DefaultRegistry() Registry {
 		python.Name():  python,
 		command.Name(): command,
 		mermaid.Name(): mermaid,
+		d2.Name():      d2,
 	}
 }
 
@@ -132,7 +144,13 @@ func (r Registry) Resolve(ctx context.Context, run Runner, req Request) (string,
 		return "", fmt.Errorf("generator %q: %w", g.Name(), err)
 	}
 
-	bin, args := g.Command(specPath, dataPath, abs, tokensJSON, req.Spec.Args)
+	specForCmd, cleanup, err := prepareSpec(g, specPath, specBytes, req.Tokens)
+	if err != nil {
+		return "", fmt.Errorf("generator %q: %w", g.Name(), err)
+	}
+	defer cleanup()
+
+	bin, args := g.Command(specForCmd, dataPath, abs, tokensJSON, req.Spec.Args)
 	if err := run(ctx, bin, args...); err != nil {
 		return "", fmt.Errorf("generator %q (%s): %w", g.Name(), req.Spec.Spec, err)
 	}
@@ -143,6 +161,35 @@ func (r Registry) Resolve(ctx context.Context, run Runner, req Request) (string,
 			g.Name(), req.Spec.Spec, rel)
 	}
 	return rel, nil
+}
+
+// prepareSpec returns the spec path Command should receive: the original, or
+// (when g implements TokenInjector) a temp file holding spec rewritten to
+// embed tokens. The caller must always call cleanup, which is a no-op when
+// no rewrite happened.
+func prepareSpec(g Generator, specPath string, spec []byte, tokens map[string]string) (string, func(), error) {
+	inj, ok := g.(TokenInjector)
+	if !ok {
+		return specPath, func() {}, nil
+	}
+	merged, err := inj.InjectTokens(spec, tokens)
+	if err != nil {
+		return "", func() {}, err
+	}
+	tmp, err := os.CreateTemp("", "gen-*-"+filepath.Base(specPath))
+	if err != nil {
+		return "", func() {}, err
+	}
+	if _, err := tmp.Write(merged); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return "", func() {}, err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", func() {}, err
+	}
+	return tmp.Name(), func() { _ = os.Remove(tmp.Name()) }, nil
 }
 
 // encodeTokens serialises tokens deterministically so the cache key is stable.

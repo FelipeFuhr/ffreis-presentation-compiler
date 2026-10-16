@@ -159,6 +159,7 @@ func TestResolveFailureModes(t *testing.T) {
 			nil, true, "escapes",
 		},
 		{"tool not installed", gen.Spec{Generator: "python", Spec: "chart.py"}, nil, false, "needs \"python3\""},
+		{"d2 not installed", gen.Spec{Generator: "d2", Spec: "chart.py"}, nil, false, "needs \"d2\""},
 		{
 			"generator exits non-zero",
 			gen.Spec{Generator: "python", Spec: "chart.py"},
@@ -196,7 +197,7 @@ func TestResolveFailureModes(t *testing.T) {
 
 func TestRegistryNames(t *testing.T) {
 	got := strings.Join(gen.DefaultRegistry().Names(), ",")
-	if got != "cmd,mermaid,python" {
+	if got != "cmd,d2,mermaid,python" {
 		t.Errorf("Names() = %q", got)
 	}
 }
@@ -288,5 +289,97 @@ func TestDiagramKeyIsAnAliasForChart(t *testing.T) {
 	}
 	if _, ok := d.Slides[0].Fields[gen.MediaKey]; !ok {
 		t.Error("a diagram spec did not produce media")
+	}
+}
+
+func TestD2InjectsThemeTokensIntoTheSpecBeforeInvocation(t *testing.T) {
+	stubLookPath(t, true)
+	root := t.TempDir()
+	specPath := filepath.Join(root, "diagram.d2")
+	if err := os.WriteFile(specPath, []byte("a -> b\n"), 0o600); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	out := t.TempDir()
+
+	var seenSpecPath string
+	var seenSpecContent []byte
+	runner := func(_ context.Context, name string, args ...string) error {
+		if name != "d2" {
+			t.Errorf("command = %q, want d2", name)
+		}
+		if len(args) < 2 {
+			t.Fatalf("args = %v, want at least an input and an output path", args)
+		}
+		seenSpecPath = args[0]
+		b, err := os.ReadFile(seenSpecPath)
+		if err != nil {
+			t.Fatalf("read rewritten spec: %v", err)
+		}
+		seenSpecContent = b
+		return os.WriteFile(args[1], []byte("<svg/>"), 0o600)
+	}
+
+	req := gen.Request{
+		Spec:     gen.Spec{Generator: "d2", Spec: "diagram.d2"},
+		DeckRoot: root,
+		OutDir:   out,
+		Tokens: map[string]string{
+			"accent":      "#02accf",
+			"accent-text": "#0e3c45",
+			// Not hex: d2 rejects anything but a named colour or a hex code in
+			// a theme-overrides slot, so this must be dropped rather than
+			// forwarded and left to fail at the d2 compile step.
+			"accent-soft": "rgba(2, 172, 207, 0.1)",
+		},
+	}
+
+	if _, err := gen.DefaultRegistry().Resolve(context.Background(), runner, req); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	if seenSpecPath == specPath {
+		t.Fatal("d2 ran on the author's own spec file; token injection must rewrite a copy, not the original")
+	}
+	for _, want := range []string{`B1: "#02accf"`, `N1: "#0e3c45"`, "a -> b"} {
+		if !strings.Contains(string(seenSpecContent), want) {
+			t.Errorf("rewritten spec %q is missing %q", seenSpecContent, want)
+		}
+	}
+	if strings.Contains(string(seenSpecContent), "rgba") {
+		t.Error("rewritten spec forwarded a non-hex token value, which d2 rejects outright")
+	}
+	if _, err := os.Stat(seenSpecPath); !os.IsNotExist(err) {
+		t.Errorf("temp spec %q was left behind after Resolve", seenSpecPath)
+	}
+}
+
+func TestD2CommandIsPositionalNotFlagBased(t *testing.T) {
+	stubLookPath(t, true)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "diagram.d2"), []byte("a -> b\n"), 0o600); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	out := t.TempDir()
+
+	var cmd []string
+	runner := func(_ context.Context, name string, args ...string) error {
+		cmd = append([]string{name}, args...)
+		return os.WriteFile(args[1], []byte("<svg/>"), 0o600)
+	}
+
+	req := gen.Request{
+		Spec:     gen.Spec{Generator: "d2", Spec: "diagram.d2", Args: []string{"--layout", "elk"}},
+		DeckRoot: root,
+		OutDir:   out,
+	}
+	if _, err := gen.DefaultRegistry().Resolve(context.Background(), runner, req); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	if len(cmd) < 4 || cmd[0] != "d2" || cmd[len(cmd)-2] != "--layout" || cmd[len(cmd)-1] != "elk" {
+		t.Errorf("command = %v, want [d2 <input> <output> --layout elk]", cmd)
+	}
+	if strings.Contains(strings.Join(cmd, " "), "--out") {
+		t.Error("d2's command line must not carry --out: it takes a positional output path")
 	}
 }
