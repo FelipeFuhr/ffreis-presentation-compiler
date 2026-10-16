@@ -38,6 +38,8 @@ func run(program string, args []string, stdout, stderr io.Writer) int {
 		return runCheck(args[1:], stdout, stderr)
 	case "golden":
 		return runGolden(args[1:], stdout, stderr)
+	case "parity":
+		return runParity(args[1:], stdout, stderr)
 	case "metrics":
 		return runMetrics(args[1:], stdout, stderr)
 	case "serve":
@@ -62,6 +64,7 @@ usage:
   %s validate  -deck-root <dir> -theme-root <dir>
   %s check     [-dir dist] [-theme-root <dir> -theme <name>] [-pdf <file>]
   %s golden    -dir <rendered-slides-dir> [-baseline examples/golden] [-tolerance 0.01]
+  %s parity    -deck-root <dir> -dir <rendered-slides-dir> [-lang por] [-tolerance 0.12]
   %s metrics   [-dir dist] [-out metrics.json]
   %s serve     -deck-root <dir> -theme-root <dir> [-addr 127.0.0.1:8080]
   %s doctor
@@ -72,8 +75,9 @@ commands:
   check     measure a rendered deck: overflow, out-of-bounds, tiny-type,
             contrast, missing-asset, font-fallback, overlap, pdf-pages
   golden    compare freshly rendered slide PNG files against an approved baseline
+  parity    OCR rendered slide PNG files and report words missing from the source
   metrics   extract per-slide layout metrics (box geometry, density, palette…)
   serve     render, serve over loopback HTTP, and reload on source changes
   doctor    report which render adapters are available on this machine
-`, program, program, program, program, program, program, program, program)
+`, program, program, program, program, program, program, program, program, program)
 }

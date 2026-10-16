@@ -37,7 +37,7 @@ func Load(root string) (*Deck, error) {
 		return nil, fmt.Errorf("parse %s: %w", manifest, err)
 	}
 
-	slides, err := loadSlides(filepath.Join(root, slidesDir))
+	slides, err := loadSlides(root, filepath.Join(root, slidesDir))
 	if err != nil {
 		return nil, err
 	}
@@ -46,8 +46,10 @@ func Load(root string) (*Deck, error) {
 }
 
 // loadSlides parses every Markdown file in dir, dropping skipped slides and
-// numbering what remains.
-func loadSlides(dir string) ([]Slide, error) {
+// numbering what remains. root is the deck root a slide's rows_csv (and any
+// future compiler-resolved path) is resolved against — dir is already one
+// level below it.
+func loadSlides(root, dir string) ([]Slide, error) {
 	paths, err := filepath.Glob(filepath.Join(dir, "*.md"))
 	if err != nil {
 		return nil, fmt.Errorf("scan %s: %w", dir, err)
@@ -59,7 +61,7 @@ func loadSlides(dir string) ([]Slide, error) {
 
 	slides := make([]Slide, 0, len(paths))
 	for _, path := range paths {
-		s, err := loadSlide(path)
+		s, err := loadSlide(root, path)
 		if err != nil {
 			return nil, err
 		}
@@ -76,7 +78,7 @@ func loadSlides(dir string) ([]Slide, error) {
 }
 
 // loadSlide parses one slide file into front-matter plus rendered body.
-func loadSlide(path string) (*Slide, error) {
+func loadSlide(root, path string) (*Slide, error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // slide paths come from globbing the operator-supplied deck root
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
@@ -93,6 +95,9 @@ func loadSlide(path string) (*Slide, error) {
 	fields, err := layoutFields(front)
 	if err != nil {
 		return nil, fmt.Errorf("parse front-matter in %s: %w", path, err)
+	}
+	if err := resolveRowsCSV(root, fields); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	s.Fields = fields
 	s.Source = path

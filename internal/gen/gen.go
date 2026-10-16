@@ -11,6 +11,7 @@
 package gen
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -57,6 +58,17 @@ type Generator interface {
 // Runner executes an external command; injected so tests need no toolchain.
 type Runner func(ctx context.Context, name string, args ...string) error
 
+// TokenInjector is implemented by a generator whose tool has no runtime flag
+// for custom colours, so tokens can only reach it by rewriting the spec file
+// itself before invocation. Resolve calls this, when the chosen generator
+// implements it, on a cache miss only — spec/data bytes and tokensJSON are
+// still what the cache key hashes (see fingerprint), so this never changes
+// what counts as a cache hit, only what gets written to disk and handed to
+// Command on a miss.
+type TokenInjector interface {
+	InjectTokens(spec []byte, tokens map[string]string) ([]byte, error)
+}
+
 // Registry maps generator names to implementations.
 type Registry map[string]Generator
 
@@ -66,6 +78,7 @@ func DefaultRegistry() Registry {
 		python.Name():  python,
 		command.Name(): command,
 		mermaid.Name(): mermaid,
+		d2.Name():      d2,
 	}
 }
 
@@ -132,17 +145,101 @@ func (r Registry) Resolve(ctx context.Context, run Runner, req Request) (string,
 		return "", fmt.Errorf("generator %q: %w", g.Name(), err)
 	}
 
-	bin, args := g.Command(specPath, dataPath, abs, tokensJSON, req.Spec.Args)
+	specForCmd, cleanup, err := prepareSpec(g, specPath, specBytes, req.Tokens)
+	if err != nil {
+		return "", fmt.Errorf("generator %q: %w", g.Name(), err)
+	}
+	defer cleanup()
+
+	bin, args := g.Command(specForCmd, dataPath, abs, tokensJSON, req.Spec.Args)
 	if err := run(ctx, bin, args...); err != nil {
 		return "", fmt.Errorf("generator %q (%s): %w", g.Name(), req.Spec.Spec, err)
 	}
-	// A generator that exits 0 without writing is a silent failure; refuse it.
-	info, err := os.Stat(abs)
-	if err != nil || info.Size() == 0 {
+
+	// A generator that exits 0 without writing a legitimate artifact is a
+	// silent failure; refuse it. The file is read once here and reused for
+	// both the emptiness check and the format sniff below.
+	data, err := os.ReadFile(abs) //nolint:gosec // this package's own content-addressed output path, not operator input
+	if err != nil || len(data) == 0 {
+		_ = os.Remove(abs) // never leave a 0-byte write cached at its content hash
 		return "", fmt.Errorf("generator %q (%s): exited cleanly but wrote no output to %s",
 			g.Name(), req.Spec.Spec, rel)
 	}
+	if err := validateArtifact(g.Ext(), data); err != nil {
+		// Same reasoning as above: the cache-hit check at the top of this
+		// function keys only on (generator, spec, data, tokens), so a broken
+		// artifact left on disk would make every future build with the same
+		// inputs silently "succeed" by reusing it.
+		_ = os.Remove(abs)
+		return "", fmt.Errorf("generator %q (%s): %s: %w", g.Name(), req.Spec.Spec, rel, err)
+	}
 	return rel, nil
+}
+
+// MinArtifactBytes is the smallest a generated artifact is allowed to be
+// before it counts as a legitimate diagram or chart rather than a near-empty
+// write — an `<svg/>` root with no children, a truncated partial write — that
+// a crashed or misconfigured generator can still exit 0 for. Comfortably
+// under anything a real generator produces (the smallest real fixture this
+// repo has rendered, a two-node d2 diagram, is in the tens of thousands of
+// bytes) and comfortably over what a degenerate write reaches, so this is not
+// a threshold real output could plausibly trip by being unusually small.
+const MinArtifactBytes = 256
+
+// pngSignature is the fixed 8-byte header every PNG file starts with.
+var pngSignature = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+
+// validateArtifact checks data is plausibly real content for ext, not merely
+// non-empty. Format sniffing is deliberately shallow — this defends against a
+// generator that crashed or misconfigured partway through (wrote an error
+// message, a degenerate empty root element, a truncated stream), not against
+// a trusted tool producing subtly wrong output, which this package has no way
+// to judge and content-parity-style checks exist for instead.
+func validateArtifact(ext string, data []byte) error {
+	if len(data) < MinArtifactBytes {
+		return fmt.Errorf("wrote only %d byte(s), want at least %d — looks like a truncated or near-empty artifact",
+			len(data), MinArtifactBytes)
+	}
+	switch ext {
+	case "svg":
+		if !bytes.Contains(data, []byte("<svg")) || !bytes.Contains(data, []byte("</svg>")) {
+			return fmt.Errorf("does not look like SVG: no <svg>…</svg> element")
+		}
+	case "png":
+		if !bytes.HasPrefix(data, pngSignature) {
+			return fmt.Errorf("does not start with a PNG signature")
+		}
+	}
+	return nil
+}
+
+// prepareSpec returns the spec path Command should receive: the original, or
+// (when g implements TokenInjector) a temp file holding spec rewritten to
+// embed tokens. The caller must always call cleanup, which is a no-op when
+// no rewrite happened.
+func prepareSpec(g Generator, specPath string, spec []byte, tokens map[string]string) (string, func(), error) {
+	inj, ok := g.(TokenInjector)
+	if !ok {
+		return specPath, func() {}, nil
+	}
+	merged, err := inj.InjectTokens(spec, tokens)
+	if err != nil {
+		return "", func() {}, err
+	}
+	tmp, err := os.CreateTemp("", "gen-*-"+filepath.Base(specPath))
+	if err != nil {
+		return "", func() {}, err
+	}
+	if _, err := tmp.Write(merged); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+		return "", func() {}, err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmp.Name())
+		return "", func() {}, err
+	}
+	return tmp.Name(), func() { _ = os.Remove(tmp.Name()) }, nil
 }
 
 // encodeTokens serialises tokens deterministically so the cache key is stable.

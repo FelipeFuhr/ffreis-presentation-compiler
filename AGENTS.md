@@ -112,7 +112,7 @@ authored one:
 
 ```yaml
 chart:
-  generator: python        # python | cmd | mermaid
+  generator: python        # python | cmd | mermaid | d2
   spec: charts/bars.py
   data: data/throughput.csv
   args: ["--title", "Units per week"]
@@ -132,11 +132,36 @@ sample theme and cyan in a brand theme, with no edit.
 Output is content-addressed under `<out>/generated/<hash>.svg`; the key covers
 the spec, the data **and** the tokens, so changing the theme regenerates charts
 rather than serving a stale one. A generator that exits 0 without writing a
-non-empty file is treated as a failure, not a no-op.
+legitimate artifact is treated as a failure, not a no-op — and not cached as
+one either: `Resolve` deletes whatever it wrote before returning the error, so
+a broken artifact never survives at its own content-hash path to be served to
+the next build with identical inputs.
+
+**"Legitimate" is `gen.validateArtifact`, two checks deep.** First, size:
+`gen.MinArtifactBytes` (256) rejects anything smaller, which an `<svg/>` root
+with no children — a generator that crashed before drawing anything but still
+exited 0 — cannot clear; a real chart or diagram runs into the thousands of
+bytes. Second, format: for `svg`, the bytes must contain both `<svg` and
+`</svg>`; for `png`, they must start with the 8-byte PNG signature. Both
+checks are deliberately shallow — this is catching a crashed or
+misconfigured generator, not judging a trusted tool's output byte for byte,
+which is what `parity` (below) exists for instead.
 
 `mermaid` is registered but does not receive `--tokens` — `mmdc` themes through
 its own config, so diagrams inherit the brand less automatically than python
 charts do.
+
+`d2` takes no `--tokens` argument either, for a different reason: d2 has no
+runtime flag for custom colours, only a `vars: { d2-config: { theme-overrides:
+{ … } } }` block in the diagram's own source. So for this one generator the
+compiler rewrites a copy of the spec before invoking it, prepending that block
+from whichever of a small, documented token subset (`accent`, `accent-text`,
+`paper`, `paper-strong` → D2's `B1`, `N1`, `N7`, `N6` slots) is present and a
+plain hex colour — d2 rejects `rgba()` and other CSS functions outright, so a
+token in that shape is dropped rather than forwarded to fail. A theme's own
+vars still apply to anything that subset does not cover. `d2`'s command line
+is positional (`d2 <spec> <out>`), not the `--out`/`--tokens` flag contract the
+other generators share — that part is d2's own CLI, unrelated to the rewrite.
 
 ## PPTX export
 
@@ -324,6 +349,50 @@ approved baseline under `examples/golden/`.
 - Baselines are binary files in a Go repo, so they are kept as small as
   reasonably possible for a 7-slide deck (~670 KB total as of this writing).
 
+## OCR content parity (`parity`, `internal/parity/`)
+
+Checks something golden images and `check` cannot: whether the words on a
+rendered slide are the words its own source declares. A table can fit the
+slide, pass every contrast and overflow rule, and still be wrong — a dropped
+section, a hedge like "(a confirmar)" quietly turned into a bare figure, a
+whole paragraph a hand port forgot. `check` measures geometry and `golden`
+measures pixels; neither has an opinion on content. `parity` OCRs each
+rendered slide PNG (`tesseract stdin stdout -l <lang>` — no temp files) and
+compares the recognised text against `parity.ExpectedWords(slide)`: the
+slide's kicker/title/phase, its rendered body prose, and every string leaf in
+its layout fields, walked recursively the same shape `internal/theme`'s
+template funcs coerce YAML into.
+
+- **Excluded on purpose:** `Notes` (speaker notes, never painted on the
+  slide) and `Badge` (a path) from chrome; `alt`, `media`, `chart`, `diagram`
+  from a slide's fields — an asset path or a generator's own config block is
+  not prose, and a chart's `args` cannot be told apart from flags
+  positionally, so the whole block is out of scope rather than guessed at.
+- **Comparison is fuzzy by design.** Both sides are lowercased and folded
+  through a small, hand-rolled diacritic table (no new dependency: the
+  target is Romance/Germanic Latin-script decks, and a script family that
+  table does not cover would not tokenize into words by whitespace-splitting
+  anyway), then tokenized to words of at least 4 letters —
+  `parity.minSignificantWordLen` — since OCR mangles short, common words the
+  most and they carry the least signal.
+- **`parity.DefaultMissingWordTolerance` (12%) is deliberately coarse.** It
+  exists to catch a dropped section — many of a slide's own words missing at
+  once — not a single short phrase on an otherwise text-rich slide. That
+  smaller class is why `Report` prints every slide's full missing-word list
+  even when it passes tolerance: a human (or a model) reads it the same way
+  an adversarial pass already does by hand.
+- **OCR language is resolved, not guessed from content.** `-lang` overrides;
+  absent that, `parity.OCRLang` maps the deck's own `lang:` (BCP 47) primary
+  subtag to a tesseract code, falling back to `eng`. The wrong language model
+  does not error — it degrades (accents misread) — which is the right
+  failure mode for a check that is already approximate.
+- **Advisory, like `review`:** needs an external tool (`doctor` reports it,
+  same as the generator hook's python/mermaid/d2), and a missing-word count
+  is a prompt to look, not proof of a defect — OCR of real deck PNG files scored
+  0/N missing across the entire shipped example on first run, confirmed by
+  deliberately editing a slide's source without re-rendering and watching
+  `parity` name every word the stale PNG was missing.
+
 ## Model-assisted review (`metrics`, `review`)
 
 A second, independent review lane over the same rendered deck — advisory,
@@ -424,6 +493,22 @@ Quote any cell value that might contain a comma. The rule only looks at a
 `rows` element when it is itself a list — a layout that shapes rows as maps
 (one row per `{name, price, benefits}`, say) has no cell count to compare
 against `columns`, so it is skipped rather than flagged.
+
+**`rows_csv: path/to/file.csv`, on any slide, is the structural fix for the
+same bug.** It replaces an inline `rows:` sequence; `deck.Load` reads the CSV
+(via `encoding/csv`, so RFC 4180 quoting — not YAML's — governs a comma
+inside a value) and fills in `rows` and, unless the slide already declares
+its own, `columns` from the file's header row before the slide ever reaches
+the contract or a template, so a CSV- and a YAML-authored table are
+indistinguishable to either. A ragged CSV row (wrong field count) is a parse
+error naming the line — row-arity becomes structurally impossible rather
+than a rule that has to catch it after the fact. When a slide declares both
+`columns:` and `rows_csv:`, the CSV header must match the declaration
+exactly, cell for cell: a column renamed in the CSV without updating
+`columns:` fails the build instead of silently misaligning every value under
+it, the same failure mode the whole mechanism exists to prevent. A slide
+setting both `rows:` and `rows_csv:` is rejected outright — only one may
+author a table's rows.
 
 **`undescribed-layout` is the one advisory rule, and the split matters.**
 Whether a layout exists is the *theme's* answer — `theme.LayoutNames()` —
@@ -538,6 +623,7 @@ internal/pathsafe/                 the one path-containment helper, shared by th
 internal/render/                   document shell + slide assembly (base.gohtml)
 internal/check/                    measured checks (probe.js)
 internal/golden/                   perceptual PNG diff for visual regression
+internal/parity/                   OCR content-parity: rendered PNG vs. source
 internal/metrics/                  per-slide layout metrics for review (metrics.js)
 internal/engine/                   Renderer port, Runner, PDF/PNG/PPTX adapters
 internal/engine/chrome/            CDP client, shared by check + adapters
@@ -557,9 +643,11 @@ examples/contract-fixture/         deliberately broken deck, for validate-selfte
 ## Roadmap
 
 Implemented: content model, theme + layouts, HTML, PDF, PNG, PPTX (image mode),
-the generator hook, `check` (all eight rules), `validate` (all six rules),
-the SEO surface, `serve`, `doctor`, five self-tests, golden images
-(`golden`/`golden-update`), and model-assisted review (`metrics`/`review`).
+the generator hook (python, cmd, mermaid, d2), CSV-sourced table rows
+(`rows_csv`), `check` (all eight rules), `validate` (all six rules), the SEO
+surface, `serve`, `doctor`, five self-tests, golden images
+(`golden`/`golden-update`), OCR content parity (`parity`), and model-assisted
+review (`metrics`/`review`).
 Next: nothing queued — this list is empty.
 
 ## Keeping this file current

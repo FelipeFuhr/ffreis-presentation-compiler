@@ -467,3 +467,43 @@ func TestMissingMediaIsStillReportedWithoutAChart(t *testing.T) {
 		t.Error("a slide with neither media nor a chart must still be reported")
 	}
 }
+
+// TestValidateAcceptsACSVSourcedTableWithNoContractChange proves the
+// integration, not just the unit: a slide authored with rows_csv instead of
+// an inline rows: sequence satisfies the table layout's existing
+// required:[columns, rows] with no contract.yaml entry of its own — by the
+// time Validate sees the slide, deck.Load has already resolved it into the
+// same shape an inline YAML table would have produced.
+func TestValidateAcceptsACSVSourcedTableWithNoContractChange(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "deck.yaml"), []byte("title: T\ntheme: sample\n"), 0o600); err != nil {
+		t.Fatalf("write deck.yaml: %v", err)
+	}
+	slidesDir := filepath.Join(root, "slides")
+	if err := os.MkdirAll(slidesDir, 0o750); err != nil {
+		t.Fatalf("mkdir slides: %v", err)
+	}
+	slide := "---\nlayout: table\ntitle: Benchmark\nrows_csv: data/bench.csv\n---\n"
+	if err := os.WriteFile(filepath.Join(slidesDir, "01-bench.md"), []byte(slide), 0o600); err != nil {
+		t.Fatalf("write slide: %v", err)
+	}
+	dataDir := filepath.Join(root, "data")
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
+		t.Fatalf("mkdir data: %v", err)
+	}
+	csv := "Clube,Arrecadação\nGrêmio,\"R$ 90 milhões\"\n"
+	if err := os.WriteFile(filepath.Join(dataDir, "bench.csv"), []byte(csv), 0o600); err != nil {
+		t.Fatalf("write bench.csv: %v", err)
+	}
+
+	d, err := deck.Load(root)
+	if err != nil {
+		t.Fatalf("deck.Load: %v", err)
+	}
+	th := loadSampleTheme(t)
+
+	findings := contract.Validate(d, th, root)
+	if len(findings) != 0 {
+		t.Errorf("a CSV-sourced table must satisfy the table layout's contract unchanged, got %s", contract.Report(findings))
+	}
+}
