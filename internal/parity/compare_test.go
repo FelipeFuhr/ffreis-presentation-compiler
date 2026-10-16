@@ -150,3 +150,17 @@ func TestHasMismatch(t *testing.T) {
 		t.Error("HasMismatch false for a slide well over tolerance")
 	}
 }
+
+func TestReportMarksAFailingSlideAndSummarizesTheCount(t *testing.T) {
+	results := []parity.SlideResult{
+		{Number: 1, Source: "01.md", Expected: 10, Missing: nil},
+		{Number: 2, Source: "02.md", Expected: 10, Missing: []string{"a", "b", "c", "d"}}, // 40%
+	}
+	report := parity.Report(results, parity.DefaultMissingWordTolerance)
+	if !strings.Contains(report, "slide 2: FAIL") {
+		t.Errorf("report does not mark slide 2 as FAIL:\n%s", report)
+	}
+	if !strings.Contains(report, "1 of 2 slide(s) exceed tolerance") {
+		t.Errorf("report does not summarize the failing count:\n%s", report)
+	}
+}

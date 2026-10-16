@@ -88,3 +88,23 @@ func TestExpectedWordsWalksNestedTableRows(t *testing.T) {
 		}
 	}
 }
+
+func TestExpectedWordsWalksIntoNestedMapFields(t *testing.T) {
+	// A fact-sheet-style layout's lead field is itself a mapping
+	// ({label, value}), not a flat string or a list of strings — the branch
+	// walkValue's map[string]any case exists for.
+	s := deck.Slide{
+		Fields: map[string]any{
+			"lead": map[string]any{
+				"label": "Nome do Projeto",
+				"value": "Otimização do Quadro Social",
+			},
+		},
+	}
+	got := words(t, s)
+	for _, want := range []string{"nome", "projeto", "otimizacao", "quadro", "social"} {
+		if !got[want] {
+			t.Errorf("ExpectedWords did not walk into the nested lead mapping for %q, got %v", want, got)
+		}
+	}
+}

@@ -39,6 +39,13 @@ func parseParityOptions(args []string, stderr io.Writer) (*parityOptions, error)
 	return &o, nil
 }
 
+// newParityRunner is a variable for the same reason newMetricsBrowser is: it
+// is the one line in this file that needs the real tesseract binary, and
+// stubbing it lets a test drive runParity end to end — flag parsing, deck
+// loading, language resolution, the report and its exit code — without the
+// OCR tool deciding whether the test passes.
+var newParityRunner = func() parity.Runner { return parity.ExecRunner }
+
 // runParity OCRs a deck's own rendered slide PNG files and compares the result
 // against the deck's authored source, so a dropped section or annotation is
 // a build-time finding rather than something only a line-by-line read
@@ -67,7 +74,7 @@ func runParity(args []string, stdout, stderr io.Writer) int {
 		lang = parity.OCRLang(d.Language(""))
 	}
 
-	results, err := parity.CompareDeck(context.Background(), parity.ExecRunner, d, opts.dir, lang)
+	results, err := parity.CompareDeck(context.Background(), newParityRunner(), d, opts.dir, lang)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "parity: %v\n", err)
 		return exitError

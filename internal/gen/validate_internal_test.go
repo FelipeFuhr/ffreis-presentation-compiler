@@ -1,6 +1,7 @@
 package gen
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -56,5 +57,26 @@ func TestValidateArtifactSkipsFormatSniffingForAnUnknownExtension(t *testing.T) 
 func TestValidateArtifactRejectsAnythingUnderTheSizeFloorRegardlessOfFormat(t *testing.T) {
 	if err := validateArtifact("txt", []byte("tiny")); err == nil {
 		t.Error("want the size floor to apply even to a format this package does not sniff")
+	}
+}
+
+// fakeTokenInjector lets a test exercise prepareSpec's error-handling branch
+// for InjectTokens failing — d2Generator's own implementation never does, so
+// this is the only way to prove the branch behaves rather than merely exists.
+type fakeTokenInjector struct {
+	Generator
+	err error
+}
+
+func (f fakeTokenInjector) InjectTokens([]byte, map[string]string) ([]byte, error) {
+	return nil, f.err
+}
+
+func TestPrepareSpecPropagatesATokenInjectorFailure(t *testing.T) {
+	boom := errors.New("boom")
+	_, cleanup, err := prepareSpec(fakeTokenInjector{Generator: python, err: boom}, "spec.d2", []byte("x"), nil)
+	defer cleanup()
+	if !errors.Is(err, boom) {
+		t.Errorf("prepareSpec error = %v, want it to wrap %v", err, boom)
 	}
 }
