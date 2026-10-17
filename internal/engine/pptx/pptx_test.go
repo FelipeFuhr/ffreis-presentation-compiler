@@ -161,6 +161,42 @@ func TestSlideGeometryAndNotes(t *testing.T) {
 	}
 }
 
+// TestNotesCarryTheDecksLanguage locks the removal of a hardcoded pt-BR from
+// the notes writer — one consumer's language baked into a public,
+// consumer-agnostic compiler, which is what the -deck-root/-theme-root
+// discipline exists to avoid. It sets only PowerPoint's spell-check language
+// for the notes pane, which is why it survived unnoticed; the fallback must
+// still be a real tag, because the zero value would write lang="".
+func TestNotesCarryTheDecksLanguage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		lang string
+		want string
+	}{
+		{"the deck's own tag", "fr-CA", `lang="fr-CA"`},
+		{"an unset tag falls back", "", `lang="` + pptx.DefaultNotesLang + `"`},
+		{"a blank tag falls back", "   ", `lang="` + pptx.DefaultNotesLang + `"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := filepath.Join(t.TempDir(), "deck.pptx")
+			d := pptx.Deck{WidthIn: 13.333, HeightIn: 7.5, Lang: tc.lang,
+				Slides: []pptx.Slide{{PNG: onePixelPNG, Notes: "a note"}}}
+			if err := pptx.Write(dst, d); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+
+			parts, _ := readAll(t, dst)
+			notes := parts["ppt/notesSlides/notesSlide1.xml"]
+			if !strings.Contains(notes, tc.want) {
+				t.Errorf("notes do not carry %s:\n%s", tc.want, notes)
+			}
+			if strings.Contains(notes, "pt-BR") {
+				t.Errorf("a consumer's language is still hardcoded in the notes writer:\n%s", notes)
+			}
+		})
+	}
+}
+
 func TestNotesAreXMLEscaped(t *testing.T) {
 	dst := writeDeck(t, pptx.Slide{PNG: onePixelPNG, Notes: `R&D <ops> "quoted"`})
 	parts, _ := readAll(t, dst)

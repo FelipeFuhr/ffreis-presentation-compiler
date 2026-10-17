@@ -39,6 +39,11 @@ type Job struct {
 	// Size is the page size; the PDF path sets it explicitly as well as via
 	// CSS, because a theme could otherwise silently resize every page.
 	Size deck.Size
+	// Lang is the document's resolved BCP 47 language tag. Only the PPTX path
+	// reads it today (speaker notes carry a language for spell-check); it
+	// travels on the Job rather than on one adapter's struct because it is a
+	// property of the document being exported, like Size.
+	Lang string
 }
 
 // Renderer turns a Job into an artifact of a single Format.

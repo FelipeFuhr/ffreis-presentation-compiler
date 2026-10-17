@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/check"
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/deck"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine"
 )
 
@@ -623,6 +624,21 @@ func TestServeDefaultsToALoopbackAddress(t *testing.T) {
 	}
 }
 
+// TestServeDoesNotDefaultToAConsumersLanguage guards the residue of a
+// default that was removed from `build` but left here: render.Render resolves
+// Options.Lang through deck.Language, so a non-empty default on this flag
+// overrode every deck's own lang: on every preview. Empty is what lets the
+// content answer.
+func TestServeDoesNotDefaultToAConsumersLanguage(t *testing.T) {
+	opts, err := parseServeOptions([]string{"-deck-root", sampleDeck, "-theme-root", sampleThemes}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseServeOptions: %v", err)
+	}
+	if opts.lang != "" {
+		t.Errorf("default -lang = %q, want empty so the deck's own lang: wins", opts.lang)
+	}
+}
+
 func TestServeAddrIsOverridable(t *testing.T) {
 	opts, err := parseServeOptions(
 		[]string{"-deck-root", sampleDeck, "-theme-root", sampleThemes, "-addr", "127.0.0.1:9999"},
@@ -681,6 +697,9 @@ type fakeRenderer struct {
 	name    string
 	content []byte
 	err     error
+	// job records what the adapter was handed, so a test can assert on the
+	// Job fields build resolves rather than on a rendered artifact.
+	job engine.Job
 }
 
 func (f *fakeRenderer) Format() engine.Format { return f.format }
@@ -688,6 +707,7 @@ func (f *fakeRenderer) Tool() string          { return "fake" }
 func (f *fakeRenderer) Available() bool       { return true }
 
 func (f *fakeRenderer) Render(_ context.Context, job engine.Job) (string, error) {
+	f.job = job
 	if f.err != nil {
 		return "", f.err
 	}
@@ -737,6 +757,38 @@ func TestBuildFailsWhenThePDFPaginatedWrong(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "3") || !strings.Contains(stderr, "7") {
 		t.Errorf("stderr does not name both counts:\n%s", stderr)
+	}
+}
+
+// TestBuildHandsTheAdaptersTheResolvedLanguage locks the resolution, not just
+// the plumbing: the PPTX writer stamps a language tag on every speaker-notes
+// run, and handing it the raw -lang flag would leave that empty for every
+// deck that declares its own lang: rather than naming one on the command
+// line. The flag still wins when it is set.
+func TestBuildHandsTheAdaptersTheResolvedLanguage(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no flag resolves to the deck's own default", nil, deck.DefaultLang},
+		{"the flag overrides", []string{"-lang", "fr-CA"}, "fr-CA"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &fakeRenderer{format: engine.FormatPDF, name: "sample-deck.pdf", content: pdfWithPages(7)}
+			stubRendererFor(t, r, nil)
+
+			args := append([]string{"build", "-deck-root", sampleDeck, "-theme-root", sampleThemes,
+				"-out", t.TempDir(), "-formats", "html,pdf"}, tc.args...)
+			code, _, stderr := exec(args...)
+
+			if code != exitOK {
+				t.Fatalf("build failed: %s", stderr)
+			}
+			if r.job.Lang != tc.want {
+				t.Errorf("job.Lang = %q, want %q", r.job.Lang, tc.want)
+			}
+		})
 	}
 }
 

@@ -29,6 +29,20 @@ const (
 	RuleUndescribedLayout = "undescribed-layout"
 )
 
+// AltKey is a slide's accessibility text for its image. It is contract
+// vocabulary rather than generator vocabulary, so it is named here and not
+// beside gen.MediaKey.
+//
+// Requiring it is key presence, which `alt: ""` satisfies — so a layout that
+// declares alt because its image IS the slide's content could ship with no
+// accessible name at all, and no `check` rule covers alt quality either
+// (missing-asset fires on a failed load, never on the text). An empty alt is
+// correct markup only for a decorative image, and a theme writes that into
+// its own template (the badge in the sample theme's slide.gohtml does); it is
+// never something a deck author declares. So a declared-but-empty alt is an
+// authoring omission, and this is the one place that can say so.
+const AltKey = "alt"
+
 // Finding is one contract violation.
 type Finding struct {
 	// Slide is the 1-based slide number; 0 for a deck-level finding.
@@ -169,7 +183,11 @@ func missingFields(s deck.Slide, layout Layout) []Finding {
 // fieldFindings walks every field a slide sets. A chart/diagram block is
 // recognised globally — on any layout, the same way chrome keys are — and
 // validated once against its own sub-contract; `media` is checked as an
-// asset; anything else must be declared by the layout.
+// asset; `alt` must carry text; anything else must be declared by the layout.
+//
+// The alt case sits AFTER the unknown-field case deliberately: checking its
+// content first would exempt `alt` from the vocabulary check on every layout
+// that never declared it.
 func fieldFindings(s deck.Slide, layout Layout, deckRoot string) []Finding {
 	known := layout.known()
 	findings := specFindings(s, deckRoot)
@@ -184,6 +202,9 @@ func fieldFindings(s deck.Slide, layout Layout, deckRoot string) []Finding {
 				Slide: s.Number, Source: s.Source, Rule: RuleUnknownField, Key: key, Fatal: true,
 				Detail: fmt.Sprintf("layout %q does not declare %q", s.Layout, key),
 			})
+		case key == AltKey:
+			_, altFindings := textFinding(s, key, s.Fields[key], "non-empty text describing the image")
+			findings = append(findings, altFindings...)
 		}
 	}
 	return findings
@@ -226,16 +247,33 @@ func specFindings(s deck.Slide, deckRoot string) []Finding {
 	return findings
 }
 
+// textFinding reports invalid-field unless raw is a string carrying at least
+// one non-whitespace character. It is the one non-empty-string primitive in
+// this package: an asset path and an image's alt are both fields whose value
+// has to be text the author actually wrote, and a second copy of the test
+// could drift from this one.
+//
+// The string is returned as authored, untrimmed — a path is used verbatim by
+// pathsafe.Contain and named verbatim in a report, so only the emptiness
+// decision looks through surrounding whitespace.
+func textFinding(s deck.Slide, key string, raw any, must string) (string, []Finding) {
+	text, ok := raw.(string)
+	if !ok || strings.TrimSpace(text) == "" {
+		return "", []Finding{{
+			Slide: s.Number, Source: s.Source, Rule: RuleInvalidField, Key: key, Fatal: true,
+			Detail: fmt.Sprintf("%q must be %s", key, must),
+		}}
+	}
+	return text, nil
+}
+
 // assetFinding checks that raw is a non-empty string path that resolves
 // inside deckRoot and exists on disk, in that order: a path that escapes the
 // root is a security finding regardless of whether anything lives there.
 func assetFinding(s deck.Slide, key string, raw any, deckRoot string) []Finding {
-	path, ok := raw.(string)
-	if !ok || path == "" {
-		return []Finding{{
-			Slide: s.Number, Source: s.Source, Rule: RuleInvalidField, Key: key, Fatal: true,
-			Detail: fmt.Sprintf("%q must be a non-empty string path", key),
-		}}
+	path, findings := textFinding(s, key, raw, "a non-empty string path")
+	if findings != nil {
+		return findings
 	}
 	abs, err := pathsafe.Contain(deckRoot, path)
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/deck"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/logx"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/serve"
 )
@@ -32,7 +33,8 @@ func parseServeOptions(args []string, stderr io.Writer) (*serveOptions, error) {
 	fs.StringVar(&o.deckRoot, "deck-root", "", "deck directory (deck.yaml + slides/)")
 	fs.StringVar(&o.themeRoot, "theme-root", "", "directory holding themes, one subdirectory per theme")
 	fs.StringVar(&o.addr, "addr", defaultServeAddr, "address to listen on (loopback by default)")
-	fs.StringVar(&o.lang, "lang", "pt-BR", "document language")
+	fs.StringVar(&o.lang, "lang", "",
+		"document language, overriding deck.yaml's `lang:` (default: the deck's own, else "+deck.DefaultLang+")")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}

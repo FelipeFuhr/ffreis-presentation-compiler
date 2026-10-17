@@ -1,0 +1,83 @@
+{
+  "$schema": "https://raw.githubusercontent.com/FelipeFuhr/ffreis-platform-standards/main/flags/flag-registry.schema.json",
+  "version": 1,
+  "project": "ffreis-presentation-compiler",
+  "flags": [
+    {
+      "name": "font_integrity",
+      "kind": "gate",
+      "category": "quality",
+      "binding": "compile",
+      "effect": "toggle",
+      "default": "error",
+      "rule": "font-integrity",
+      "seam": "internal/check/probe.js checkFonts — the font-fallback rule; findings exit non-zero via internal/cli/check.go runCheck",
+      "output_target": ["document-export", "raster-export"],
+      "description": "A self-hosted face that fails to load silently substitutes, which is how a deck stops looking like the brand without anyone noticing. The probe inspects the document.fonts FontFace set rather than document.fonts.check(), which answers \"can this text be rendered\" and is therefore true for an unknown family the fallback can draw. Deck-level, reported as slide 0. Enforced wherever `check` runs (make check, make check-selftest); it is not in this repo's PR workflow, which runs fmt/lint/test/coverage only.",
+      "exceptions": [
+        {
+          "scope": "a theme whose expected family declares no @font-face at all — a system font stack",
+          "reason": "A family with no @font-face at all is a system font the theme chose on purpose and is skipped — this rule covers the case that actually breaks, a woff2 that is missing or 404s (internal/check/probe.js:243-246, :252-253).",
+          "added": "2026-10-16"
+        }
+      ]
+    },
+    {
+      "name": "image_alt_meaningful",
+      "kind": "gate",
+      "category": "quality",
+      "binding": "compile",
+      "effect": "toggle",
+      "default": "error",
+      "rule": "image-alt-meaningful",
+      "seam": "internal/contract/validate.go fieldFindings — the invalid-field rule on contract.AltKey, via textFinding; build aborts on contract.Fatal with no flag to skip it",
+      "output_target": "document-export",
+      "description": "A layout declaring alt does so because its image is the slide's content, and requiring the key is presence only — `alt: \"\"` and whitespace-only satisfied it until this rule, shipping an image with no accessible name. Enforced on every build and every `validate`, including in a consumer deck repo's own CI, because build runs the contract check before generators and render.",
+      "exceptions": [
+        {
+          "scope": "a theme layout that renders an <img> without declaring alt in its layout vocabulary",
+          "reason": "The rule validates a declared field's value, so a template that hard-codes an image with no alt key in contract.yaml is never checked. An undescribed layout is advisory by design (a theme may ship a layout with nothing but a template), which is the cost that buys themes the freedom to extend .Fields.",
+          "added": "2026-10-16"
+        }
+      ]
+    },
+    {
+      "name": "contrast_aa",
+      "kind": "gate",
+      "category": "quality",
+      "binding": "compile",
+      "effect": "toggle",
+      "default": "error",
+      "rule": "contrast-aa",
+      "seam": "internal/check/probe.js checkContrast — real WCAG AA ratio computation (luminance + contrastRatio), 4.5:1 with the large-text threshold at probe.js:183-184",
+      "output_target": ["document-export", "raster-export"],
+      "description": "Measured on the rendered deck over CDP, per visible text leaf, against the computed background: 3:1 for large text (>=24px, or >=18.66px at weight >=700) and 4.5:1 otherwise. A measurement, not an opinion — on its first run against a real deck the rule set found three clipping bugs in slides that had already been eyeballed and passed.",
+      "exceptions": [
+        {
+          "scope": "text whose backdrop is an image or a gradient rather than a background colour",
+          "reason": "backgroundOf walks ancestors for the first background colour with alpha > 0.1 and falls back to white (probe.js:48-54), so a backdrop painted by an image or gradient is never sampled and the ratio is computed against the nearest colour instead. Nearly transparent text (alpha <= 0.1) is skipped for the same reason: there is no honest ratio to report.",
+          "added": "2026-10-16"
+        }
+      ]
+    },
+    {
+      "name": "output_gate_exists",
+      "kind": "gate",
+      "category": "quality",
+      "binding": "compile",
+      "effect": "toggle",
+      "default": "error",
+      "rule": "output-gate-exists",
+      "seam": "Makefile smoke-check (PDF page count == slide count, page size unchanged) + internal/check ComparePDFPages, which build runs automatically whenever -formats produced a PDF + Makefile export-selftest (LibreOffice round-trip of the generated pptx)",
+      "output_target": ["document-export", "raster-export"],
+      "description": "Every batch output has a gate that fails loudly. HTML: one static scrollable page, asserted present. PDF: the pdf-pages rule counts /Type /Page dictionaries in the bytes (the trap is /Type /Pages, the page-tree node, which overcounts by one without a trailing word boundary) and compares against the slide count on every build. PPTX: export-selftest round-trips the file through LibreOffice, which is the only check that would have caught the data-descriptor bug that made python-pptx accept a file LibreOffice refused with nothing but \"source file could not be loaded\".",
+      "exceptions": [
+        {
+          "scope": "visual regression of the rendered PNG output (make golden) on any machine that has not seeded its own baseline",
+          "reason": "The golden baselines are not committed: the shared hygiene-binary-files pre-commit hook rejects every binary with no allowlist, and this repo has never committed one. `make golden` errors until `make golden-update` is run once, so it fails loudly rather than passing vacuously and nothing gates on it — the code is complete and tested, but it catches drift for nobody who has not seeded a baseline. The hook must grow an opt-in allowlist upstream; do not widen it from a consumer repo.",
+          "added": "2026-10-16"
+        }
+      ]
+    }
+  ]
+}

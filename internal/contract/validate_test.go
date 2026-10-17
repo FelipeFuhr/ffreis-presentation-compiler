@@ -179,6 +179,77 @@ func TestValidateReportsAMalformedChartBlock(t *testing.T) {
 	}
 }
 
+// TestValidateRejectsAnAltThatSaysNothing locks the gap that made alt
+// enforcement vacuous: `required: [alt]` was checked by key presence alone,
+// so `alt: ""` satisfied it and shipped an image with no accessible name.
+// Whitespace-only is the same defect with a space in it, and a non-string is
+// the same defect with a type error in it.
+func TestValidateRejectsAnAltThatSaysNothing(t *testing.T) {
+	th := loadSampleTheme(t)
+	for _, tc := range []struct {
+		name string
+		alt  any
+	}{
+		{"empty string", ""},
+		{"whitespace only", "  \t "},
+		{"not a string", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &deck.Deck{Slides: []deck.Slide{
+				{Number: 4, Source: "slides/04-split.md", Layout: "split", Fields: map[string]any{
+					"alt": tc.alt,
+				}},
+			}}
+
+			findings := contract.Validate(d, th, t.TempDir())
+			if len(findings) != 1 {
+				t.Fatalf("findings = %+v, want exactly 1", findings)
+			}
+			f := findings[0]
+			if f.Rule != contract.RuleInvalidField || f.Key != "alt" {
+				t.Errorf("finding = %+v, want an invalid-field on alt", f)
+			}
+			if !contract.Fatal(findings) {
+				t.Errorf("an empty alt must fail the build:\n%s", contract.Report(findings))
+			}
+		})
+	}
+}
+
+// TestValidateAcceptsAnAltWithContent is the other half: the rule must not
+// start flagging the alt text the shipped example deck actually writes.
+func TestValidateAcceptsAnAltWithContent(t *testing.T) {
+	th := loadSampleTheme(t)
+	d := &deck.Deck{Slides: []deck.Slide{
+		{Number: 4, Source: "slides/04-split.md", Layout: "split", Fields: map[string]any{
+			"alt": "Line chart of units per week rising across five quarters",
+		}},
+	}}
+
+	if findings := contract.Validate(d, th, t.TempDir()); len(findings) != 0 {
+		t.Errorf("findings = %s, want none", contract.Report(findings))
+	}
+}
+
+// TestValidateStillReportsAnAltTheLayoutDoesNotDeclare guards the ordering
+// trap in the field switch: checking alt's content before the unknown-field
+// case would quietly exempt `alt` from the vocabulary check on every layout
+// that never declared it.
+func TestValidateStillReportsAnAltTheLayoutDoesNotDeclare(t *testing.T) {
+	th := loadSampleTheme(t)
+	d := &deck.Deck{Slides: []deck.Slide{
+		{Number: 2, Source: "slides/02-bullets.md", Layout: "bullets", Fields: map[string]any{
+			"items": []any{"one thing"},
+			"alt":   "bullets declares no alt",
+		}},
+	}}
+
+	findings := contract.Validate(d, th, t.TempDir())
+	if len(findings) != 1 || findings[0].Rule != contract.RuleUnknownField || findings[0].Key != "alt" {
+		t.Fatalf("findings = %+v, want exactly 1 unknown-field on alt", findings)
+	}
+}
+
 func TestValidateReportsAnInvalidContractOverrideAsASingleFinding(t *testing.T) {
 	root := writeMinimalTheme(t)
 	if err := os.WriteFile(filepath.Join(root, "contract.yaml"), []byte("layouts: [not a map"), 0o600); err != nil {
