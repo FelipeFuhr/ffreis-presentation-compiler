@@ -2,13 +2,14 @@ module github.com/FelipeFuhr/ffreis-presentation-compiler
 
 go 1.25
 
-// govulncheck (a hard pre-push gate via `make quality-gates`) reports seven
-// CVEs in the standard library itself — net/http, crypto/tls, net/textproto —
-// every one of them fixed at exactly go1.26.9. Without this the repo cannot be
-// pushed at all. Go's toolchain manager fetches this on demand, so no SDK
-// install is needed; the workflows' go-version is raised to match so CI does
-// not silently build on a different toolchain than it reports.
-toolchain go1.26.9
+// govulncheck (a hard pre-push gate via `make quality-gates`) reports CVEs in
+// the standard library itself, fixed only by moving the toolchain forward —
+// most recently GO-2026-6809 (crypto/x509), fixed at exactly go1.26.10.
+// Without this the repo cannot be pushed at all. Go's toolchain manager
+// fetches this on demand, so no SDK install is needed; the workflows'
+// go-version is raised to match so CI does not silently build on a different
+// toolchain than it reports.
+toolchain go1.26.10
 
 require (
 	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
