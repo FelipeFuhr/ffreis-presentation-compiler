@@ -1,6 +1,8 @@
 name: Mutation Testing
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   schedule:
     - cron: "14 10 16 * *"  # monthly scattered (was: 0 2 1 * *)
   workflow_dispatch:
@@ -20,9 +22,19 @@ permissions:
 
 jobs:
   mutation:
-    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-mutation.yml@ed2f7d29467bf1fd6ec40df3953b3ee128ba3f04
+    if: ${{ github.event_name != 'pull_request' }}
+    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-mutation.yml@4c3fd318bc57a8f17be0d49047fb869040378a87 # v1.8.0
     with:
+      runner: '["ubuntu-latest"]'
       packages: "./internal/..."
+      threshold: 60
+
+  mutation-incremental:
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-mutation.yml@4c3fd318bc57a8f17be0d49047fb869040378a87 # v1.8.0
+    with:
+      in-diff: true
+      runner: '["ubuntu-latest"]'
       threshold: 60
 
   notify-failure:
