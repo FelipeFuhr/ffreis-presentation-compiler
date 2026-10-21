@@ -11,6 +11,11 @@ on:
     branches: [main, master, develop]
     paths: ["**/*.md"]
 
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   markdownlint:
     uses: FelipeFuhr/ffreis-workflows-general/.github/workflows/general-markdownlint.yml@8ff19efd329b76bce5ff5b98074b9aec74b239da # v1.8.1
