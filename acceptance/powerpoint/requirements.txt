@@ -1,0 +1,13 @@
+# Guest-side only: installed inside the Windows VM, never on the build host.
+#
+# Pinned rather than floating because this environment is the measuring
+# instrument -- if it drifts, a red run is ambiguous between "the compiler
+# regressed" and "pywin32 changed". Bump deliberately.
+#
+# Ceiling to be aware of: an older Windows (7/8.1) tops out at Python 3.8, and
+# these pins are the newest that still support it. A VM profile for an older
+# PowerPoint is exactly where that matters -- see README.md.
+pytest==8.3.5
+pywin32==306
+Pillow==10.4.0
+psutil==6.1.1

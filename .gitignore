@@ -11,3 +11,15 @@ coverage.out
 # convention) and modelctl's own raw-reply run directory.
 .venv
 .modelctl/
+
+# The PowerPoint acceptance tests are Python (pywin32 is the only way to drive
+# desktop PowerPoint), so this otherwise-Go repo now produces bytecode caches.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# VM images, Windows/Office installers and captured diagnostics for
+# `make pptx-acceptance`. Multi-gigabyte and licensed -- never committed.
+acceptance/powerpoint/vm/
+acceptance/powerpoint/profiles/*.env
+!acceptance/powerpoint/profiles/example.env

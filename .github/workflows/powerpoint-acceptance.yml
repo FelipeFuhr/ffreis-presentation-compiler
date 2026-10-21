@@ -1,0 +1,106 @@
+name: PowerPoint acceptance
+
+# Opt-in only. This is the one check that asks real desktop Microsoft
+# PowerPoint whether it will open what the compiler wrote; everything in the
+# normal PR set is a lenient reader, and a file all of them accepted was still
+# refused by a real PowerPoint.
+#
+# There is deliberately NO automatic trigger and NO default runner label:
+#
+#   * No runner in this fleet carries a licensed desktop PowerPoint. A job that
+#     queues forever against a label nobody serves looks like a gate while
+#     gating nothing, which is worse than having no workflow at all.
+#   * GitHub's hosted windows runners do not ship Office, and have no
+#     interactive desktop session, so PowerPoint automation cannot work there.
+#     Pointing this at `windows-latest` would fail for the wrong reason.
+#
+# So dispatching it is a deliberate act that names a real machine. The runner
+# must have: desktop PowerPoint (activated), an autologon interactive desktop
+# session, Python, Go and Chrome.
+#
+# See acceptance/powerpoint/README.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: >-
+          Self-hosted runner label for a machine with licensed desktop
+          PowerPoint and a logged-on interactive session. No default: naming it
+          is how you confirm the machine exists.
+        required: true
+        type: string
+      slides:
+        description: Slide count PowerPoint must report (blank to not assert it)
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # One at a time per runner: the harness refuses to run while another
+  # PowerPoint is open, so two concurrent jobs would fail each other.
+  group: powerpoint-acceptance-${{ inputs.runner_label }}
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: Open the built pptx in desktop PowerPoint
+    runs-on: ${{ inputs.runner_label }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+
+      # Fail loudly and early rather than letting pytest skip: this job exists
+      # to verify PowerPoint, so a missing prerequisite is a failure, never a
+      # pass. POWERPOINT_ACCEPTANCE_REQUIRED below enforces the same rule
+      # inside the suite.
+      - name: Check the runner really is a PowerPoint machine
+        shell: pwsh
+        run: |
+          $missing = @()
+          if (-not (Get-Command python -ErrorAction SilentlyContinue)) { $missing += 'python' }
+          if (-not (Test-Path 'HKLM:\SOFTWARE\Classes\PowerPoint.Application')) {
+            $missing += 'desktop PowerPoint (PowerPoint.Application not registered)'
+          }
+          $chrome = Get-Command chrome, chromium, 'google-chrome' -ErrorAction SilentlyContinue
+          if (-not $chrome) { $missing += 'chrome (the pptx adapter renders slides over CDP)' }
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::not a PowerPoint acceptance runner; missing: $($missing -join ', ')"
+            exit 1
+          }
+
+      - name: Install the guest-side dependencies
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check -r acceptance/powerpoint/requirements.txt
+
+      - name: Build the deck this run will test
+        shell: pwsh
+        run: |
+          go run ./cmd/ffreis-presentation-compiler build `
+            -deck-root examples/sample-deck -theme-root examples/themes `
+            -out .bin/powerpoint/build -formats html,pptx
+
+      - name: Open it in PowerPoint
+        shell: pwsh
+        env:
+          POWERPOINT_ACCEPTANCE_REQUIRED: "1"
+          POWERPOINT_ACCEPTANCE_PPTX: .bin/powerpoint/build/sample-deck.pptx
+          POWERPOINT_ACCEPTANCE_ARTIFACTS: .bin/powerpoint/artifacts
+          POWERPOINT_ACCEPTANCE_SLIDES: ${{ inputs.slides }}
+        working-directory: acceptance/powerpoint
+        run: python -m pytest -q -p no:cacheprovider
+
+      - name: Upload the diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: powerpoint-acceptance-${{ inputs.runner_label }}
+          path: .bin/powerpoint/artifacts
+          if-no-files-found: warn

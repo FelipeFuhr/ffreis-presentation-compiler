@@ -11,13 +11,16 @@
       "effect": "toggle",
       "default": "error",
       "rule": "font-integrity",
-      "seam": "internal/check/probe.js checkFonts — the font-fallback rule; findings exit non-zero via internal/cli/check.go runCheck",
-      "output_target": ["document-export", "raster-export"],
+      "seam": "internal/check/probe.js checkFonts \u2014 the font-fallback rule; findings exit non-zero via internal/cli/check.go runCheck",
+      "output_target": [
+        "document-export",
+        "raster-export"
+      ],
       "description": "A self-hosted face that fails to load silently substitutes, which is how a deck stops looking like the brand without anyone noticing. The probe inspects the document.fonts FontFace set rather than document.fonts.check(), which answers \"can this text be rendered\" and is therefore true for an unknown family the fallback can draw. Deck-level, reported as slide 0. Enforced wherever `check` runs (make check, make check-selftest); it is not in this repo's PR workflow, which runs fmt/lint/test/coverage only.",
       "exceptions": [
         {
-          "scope": "a theme whose expected family declares no @font-face at all — a system font stack",
-          "reason": "A family with no @font-face at all is a system font the theme chose on purpose and is skipped — this rule covers the case that actually breaks, a woff2 that is missing or 404s (internal/check/probe.js:243-246, :252-253).",
+          "scope": "a theme whose expected family declares no @font-face at all \u2014 a system font stack",
+          "reason": "A family with no @font-face at all is a system font the theme chose on purpose and is skipped \u2014 this rule covers the case that actually breaks, a woff2 that is missing or 404s (internal/check/probe.js:243-246, :252-253).",
           "added": "2026-10-16"
         }
       ]
@@ -30,9 +33,9 @@
       "effect": "toggle",
       "default": "error",
       "rule": "image-alt-meaningful",
-      "seam": "internal/contract/validate.go fieldFindings — the invalid-field rule on contract.AltKey, via textFinding; build aborts on contract.Fatal with no flag to skip it",
+      "seam": "internal/contract/validate.go fieldFindings \u2014 the invalid-field rule on contract.AltKey, via textFinding; build aborts on contract.Fatal with no flag to skip it",
       "output_target": "document-export",
-      "description": "A layout declaring alt does so because its image is the slide's content, and requiring the key is presence only — `alt: \"\"` and whitespace-only satisfied it until this rule, shipping an image with no accessible name. Enforced on every build and every `validate`, including in a consumer deck repo's own CI, because build runs the contract check before generators and render.",
+      "description": "A layout declaring alt does so because its image is the slide's content, and requiring the key is presence only \u2014 `alt: \"\"` and whitespace-only satisfied it until this rule, shipping an image with no accessible name. Enforced on every build and every `validate`, including in a consumer deck repo's own CI, because build runs the contract check before generators and render.",
       "exceptions": [
         {
           "scope": "a theme layout that renders an <img> without declaring alt in its layout vocabulary",
@@ -49,9 +52,12 @@
       "effect": "toggle",
       "default": "error",
       "rule": "contrast-aa",
-      "seam": "internal/check/probe.js checkContrast — real WCAG AA ratio computation (luminance + contrastRatio), 4.5:1 with the large-text threshold at probe.js:183-184",
-      "output_target": ["document-export", "raster-export"],
-      "description": "Measured on the rendered deck over CDP, per visible text leaf, against the computed background: 3:1 for large text (>=24px, or >=18.66px at weight >=700) and 4.5:1 otherwise. A measurement, not an opinion — on its first run against a real deck the rule set found three clipping bugs in slides that had already been eyeballed and passed.",
+      "seam": "internal/check/probe.js checkContrast \u2014 real WCAG AA ratio computation (luminance + contrastRatio), 4.5:1 with the large-text threshold at probe.js:183-184",
+      "output_target": [
+        "document-export",
+        "raster-export"
+      ],
+      "description": "Measured on the rendered deck over CDP, per visible text leaf, against the computed background: 3:1 for large text (>=24px, or >=18.66px at weight >=700) and 4.5:1 otherwise. A measurement, not an opinion \u2014 on its first run against a real deck the rule set found three clipping bugs in slides that had already been eyeballed and passed.",
       "exceptions": [
         {
           "scope": "text whose backdrop is an image or a gradient rather than a background colour",
@@ -68,14 +74,41 @@
       "effect": "toggle",
       "default": "error",
       "rule": "output-gate-exists",
-      "seam": "Makefile smoke-check (PDF page count == slide count, page size unchanged) + internal/check ComparePDFPages, which build runs automatically whenever -formats produced a PDF + Makefile export-selftest (LibreOffice round-trip of the generated pptx)",
-      "output_target": ["document-export", "raster-export"],
+      "seam": "Makefile smoke-check (PDF page count == slide count, page size unchanged) + internal/check ComparePDFPages, which build runs automatically whenever -formats produced a PDF + Makefile export-selftest (LibreOffice round-trip of the generated pptx) + internal/engine/pptx/pptx_test.go byte-level local/central header assertions (data-descriptor bit, DOS date, declared zip version) + Makefile pptx-acceptance (real desktop PowerPoint, opt-in)",
+      "output_target": [
+        "document-export",
+        "raster-export"
+      ],
       "description": "Every batch output has a gate that fails loudly. HTML: one static scrollable page, asserted present. PDF: the pdf-pages rule counts /Type /Page dictionaries in the bytes (the trap is /Type /Pages, the page-tree node, which overcounts by one without a trailing word boundary) and compares against the slide count on every build. PPTX: export-selftest round-trips the file through LibreOffice, which is the only check that would have caught the data-descriptor bug that made python-pptx accept a file LibreOffice refused with nothing but \"source file could not be loaded\".",
       "exceptions": [
         {
           "scope": "visual regression of the rendered PNG output (make golden) on any machine that has not seeded its own baseline",
-          "reason": "The golden baselines are not committed: the shared hygiene-binary-files pre-commit hook rejects every binary with no allowlist, and this repo has never committed one. `make golden` errors until `make golden-update` is run once, so it fails loudly rather than passing vacuously and nothing gates on it — the code is complete and tested, but it catches drift for nobody who has not seeded a baseline. The hook must grow an opt-in allowlist upstream; do not widen it from a consumer repo.",
+          "reason": "The golden baselines are not committed: the shared hygiene-binary-files pre-commit hook rejects every binary with no allowlist, and this repo has never committed one. `make golden` errors until `make golden-update` is run once, so it fails loudly rather than passing vacuously and nothing gates on it \u2014 the code is complete and tested, but it catches drift for nobody who has not seeded a baseline. The hook must grow an opt-in allowlist upstream; do not widen it from a consumer repo.",
           "added": "2026-10-16"
+        },
+        {
+          "scope": "whether desktop Microsoft PowerPoint opens the generated pptx, on any machine with no provisioned Windows+Office VM",
+          "reason": "export-selftest asks LibreOffice, which is lenient about exactly the fields a strict OPC parser rejects: it accepted a package whose every entry declared zip version 0.0, and a desktop PowerPoint then refused the whole file with a generic repair prompt. It also exit-0s when soffice is absent and no workflow runs it, so its silence means nothing. make pptx-acceptance closes the gap with real PowerPoint, but needs a licensed Windows and Office image that cannot live in this repo and a runner that does not exist in this fleet, so it is opt-in and no automatic gate covers this output. The portable half of the class is now held by the byte-level header assertions in pptx_test.go.",
+          "added": "2026-10-21"
+        }
+      ]
+    },
+    {
+      "name": "powerpoint_acceptance",
+      "kind": "gate",
+      "category": "quality",
+      "binding": "runtime",
+      "effect": "toggle",
+      "default": "skip",
+      "rule": "powerpoint-acceptance",
+      "seam": "acceptance/powerpoint/conftest.py _gate_on_prerequisites \u2014 reads POWERPOINT_ACCEPTANCE_REQUIRED and calls pytest.fail instead of pytest.skip when it is set; scripts/powerpoint-acceptance.sh sets it for every VM run, and .github/workflows/powerpoint-acceptance.yml for the dispatched job",
+      "output_target": "document-export",
+      "description": "Whether a missing desktop PowerPoint is a skip or a failure. Default skip: almost nobody building this repo has a licensed desktop Office on the build host, and a suite that fails for everyone is a suite everyone learns to ignore. Set POWERPOINT_ACCEPTANCE_REQUIRED=1 in any run whose purpose is to verify PowerPoint \u2014 the VM orchestrator and the dispatched CI job both do \u2014 and the same absent prerequisite becomes a hard failure instead, because a skip that reads as a pass is how a gate stops gating. This exists because a pptx that satisfied zipfile, unzip, python-pptx, LibreOffice and current PowerPoint was still refused by the desktop PowerPoint it was sent to.",
+      "exceptions": [
+        {
+          "scope": "GitHub-hosted windows runners",
+          "reason": "They ship no Office and have no interactive desktop session, so PowerPoint COM automation cannot work there at all. The workflow therefore takes a runner label as a required input with no default rather than defaulting to windows-latest, so it can neither fail for the wrong reason nor queue forever against a label nobody serves.",
+          "added": "2026-10-21"
         }
       ]
     }
