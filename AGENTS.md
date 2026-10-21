@@ -180,14 +180,45 @@ and writes through `CreateRaw` with CRC and sizes populated. `pptx_test.go`
 asserts bit 3 is clear on every local header, because the failure mode gives you
 no clue where to look.
 
-Two smaller requirements learned the same way: `[Content_Types].xml` must be the
-first entry, and `FileHeader.Modified` must be set — the zero value writes month
-0, day 0, which is not a real date. A fixed epoch also makes the output
-reproducible.
+**`CreateRaw` writes exactly the header you hand it, and that is the whole
+hazard.** Every default `CreateHeader` derives on your behalf is simply absent.
+Three of them have now bitten this package, each found only after a file had
+already shipped:
 
-`make export-selftest` round-trips the generated file through LibreOffice and
-fails if it will not open, which is the only check that would have caught any of
-this.
+- **general-purpose bit 3 / CRC / sizes** — the streaming path's data
+  descriptor, above;
+- **`Modified`** — the zero value writes month 0, day 0, which is not a real
+  date (a fixed epoch also makes the output reproducible);
+- **`ReaderVersion` / `CreatorVersion`** — `CreateHeader` sets these
+  unconditionally (`fh.ReaderVersion = zipVersion20`, and the low byte of
+  `CreatorVersion` likewise). `CreateRaw` sets neither, so every entry declared
+  "version needed to extract 0.0" — not a lenient value, not an old value, but
+  the Go zero value, which is not a ZIP version at all. Deflate requires 2.0.
+
+So before adding any field here, ask what `CreateHeader` would have derived
+from it. The constants (`zipEpoch`, `zipModDate`, `zipModTime`, `zipVersion`)
+exist to make that derivation explicit rather than implied.
+
+**The version-field bug is the one worth internalising, because every tool to
+hand called the file valid.** `zipfile.testzip()`, `unzip -t`, python-pptx,
+LibreOffice and current PowerPoint all ignore the declared version — it is
+advisory, and they infer capability from the data instead. An older desktop
+Office install does not: it validated the field, found 0.0, and rejected the
+*entire package* with a generic "there was a problem with the content / repair?"
+prompt that names no part and no reason. A reader that is stricter than your
+test suite is indistinguishable from data corruption.
+
+`pptx_test.go` therefore asserts these fields at the **byte** level, parsing the
+local and central-directory headers directly rather than through `archive/zip`:
+a library that round-trips its own defaults cannot catch a default it never
+applied. `TestHeadersDeclareARealZipVersion` is that assertion.
+
+`make export-selftest` round-trips the generated file through LibreOffice, which
+is what caught the data-descriptor bug. **It would not have caught the other
+two** — LibreOffice accepts both a zero date and a zero version — and it is
+local-only: no workflow runs it, and it `exit 0`s when `soffice` is absent, so
+its silence means nothing. Treat it as one lenient reader's opinion, not as
+proof the file opens.
 
 ## SEO (`internal/seo`)
 
