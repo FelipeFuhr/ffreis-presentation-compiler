@@ -151,6 +151,7 @@ about can confirm a fix for that reader.
 | `ppt_worker.py` | child: the COM calls that may block forever |
 | `dialog_guard.py` | reads another process's dialogs; kills only our PIDs |
 | `fixtures.py` | builds known-bad packages from a known-good one |
+| `pngcheck.py` | validates a slide export; stdlib, replaces Pillow |
 
 Three rules in that code are load-bearing, not stylistic.
 
@@ -167,6 +168,15 @@ dialogs and owns the deadline.
 **Only our own PowerPoint is ever terminated.** PIDs are captured by
 diffing the running `POWERPNT.EXE` set across our own `DispatchEx`; nothing
 is ever killed by image name.
+
+**There is no Pillow.** It was carried for a screenshot and an
+"is this PNG readable" check, and brought a dozen critical and high
+advisories — heap overflows in the TIFF and JPEG decoders, an argument
+injection into Ghostscript — for decoders this harness never touches.
+Screenshots are GDI through `pywin32`; `pngcheck.py` validates exports with
+the standard library, and does it *more* strictly than `Image.verify()`,
+which checks chunk CRCs but never decompresses the pixel data. A slide
+PowerPoint began writing and abandoned passed Pillow and fails this.
 
 ## The negative control
 

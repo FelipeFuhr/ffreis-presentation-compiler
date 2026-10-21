@@ -7,7 +7,14 @@
 # Ceiling to be aware of: an older Windows (7/8.1) tops out at Python 3.8, and
 # these pins are the newest that still support it. A VM profile for an older
 # PowerPoint is exactly where that matters -- see README.md.
+#
+# Deliberately NOT here: Pillow. It was carried for a screenshot and a
+# "is this PNG readable" check, and brought a dozen critical/high advisories
+# (heap overflows in the TIFF and JPEG decoders, argument injection into
+# Ghostscript) for decoders this harness never touches -- dependency-review
+# fails the build on them, correctly. GDI through pywin32 takes the
+# screenshot and pngcheck.py validates the exports with the standard
+# library, more strictly than Image.verify() did.
 pytest==8.3.5
 pywin32==306
-Pillow==10.4.0
 psutil==6.1.1

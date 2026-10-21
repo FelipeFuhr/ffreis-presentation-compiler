@@ -37,7 +37,7 @@ if errorlevel 1 (
   exit /b 3
 )
 
-python -c "import pytest, win32com.client, psutil, PIL" >> "%LOG%" 2>&1
+python -c "import pytest, win32com.client, win32ui, psutil" >> "%LOG%" 2>&1
 if errorlevel 1 (
   echo guest dependencies missing; run: python -m pip install -r requirements.txt >> "%LOG%"
   > "%HERE%artifacts\exitcode" echo 3

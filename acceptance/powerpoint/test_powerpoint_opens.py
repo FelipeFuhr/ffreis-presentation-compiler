@@ -20,6 +20,7 @@ import os
 import pytest
 
 import fixtures
+import pngcheck
 import runner
 
 pytestmark = pytest.mark.powerpoint
@@ -80,11 +81,11 @@ def test_every_slide_exports_to_a_readable_image(verdict: runner.Verdict) -> Non
     """A presentation can open and still not render.
 
     PowerPoint will happily open a package whose slide XML it cannot draw, so
-    "opened" is necessary and not sufficient. Exporting every slide forces it to
-    actually rasterise each one.
+    "opened" is necessary and not sufficient. Exporting every slide forces it
+    to actually rasterise each one, and `pngcheck` then decompresses the pixel
+    data and compares its length against the size IHDR declares -- so a slide
+    PowerPoint began writing and abandoned is a finding, not a pass.
     """
-    from PIL import Image
-
     assert verdict.exports, "no slides were exported:\n" + verdict.describe()
     assert len(verdict.exports) == verdict.slide_count, (
         "exported %d images for %s slides" % (len(verdict.exports), verdict.slide_count)
@@ -92,22 +93,9 @@ def test_every_slide_exports_to_a_readable_image(verdict: runner.Verdict) -> Non
 
     problems = []
     for path in verdict.exports:
-        name = os.path.basename(path)
-        if not os.path.isfile(path):
-            problems.append("%s: not written" % name)
-            continue
-        if os.path.getsize(path) == 0:
-            problems.append("%s: zero bytes" % name)
-            continue
-        try:
-            with Image.open(path) as image:
-                image.verify()
-            with Image.open(path) as image:
-                width, height = image.size
-                if width <= 0 or height <= 0:
-                    problems.append("%s: degenerate size %dx%d" % (name, width, height))
-        except Exception as exc:  # noqa: BLE001 - any decode failure is the finding
-            problems.append("%s: not a readable image (%s)" % (name, exc))
+        result = pngcheck.inspect(path)
+        if not result.ok:
+            problems.append("%s: %s" % (os.path.basename(path), result.describe()))
 
     assert not problems, "slide exports are not readable:\n  " + "\n  ".join(problems)
 

@@ -141,20 +141,63 @@ def visible_dialogs(pids: Iterable[int]) -> list[dict]:
 
 
 def screenshot(path: str) -> str | None:
-    """Grab the whole desktop. Returns the path, or None if it is not possible.
+    """Grab the whole desktop to a .bmp. Returns the path, or None.
 
-    Needs an interactive session with a real desktop; in a headless or
+    Done with GDI through pywin32 rather than Pillow: Pillow was carried for
+    this one call plus a readability check, and brought a dozen critical
+    advisories in decoders this harness never touches. BMP is what
+    SaveBitmapFile writes and costs nothing to read.
+
+    Needs an interactive session with a real desktop. In a headless or
     session-0 context this fails, and that is reported rather than raised --
-    a missing screenshot should never be the reason a test errors.
+    a missing screenshot must never be the reason a test errors.
     """
+    desktop = src = mem = bitmap = None
     try:
-        from PIL import ImageGrab
+        import win32con
+        import win32gui
+        import win32ui
 
-        image = ImageGrab.grab()
-        image.save(path)
+        desktop = win32gui.GetDesktopWindow()
+        left, top, right, bottom = win32gui.GetWindowRect(desktop)
+        width, height = right - left, bottom - top
+
+        device = win32gui.GetWindowDC(desktop)
+        src = win32ui.CreateDCFromHandle(device)
+        mem = src.CreateCompatibleDC()
+        bitmap = win32ui.CreateBitmap()
+        bitmap.CreateCompatibleBitmap(src, width, height)
+        mem.SelectObject(bitmap)
+        mem.BitBlt((0, 0), (width, height), src, (left, top), win32con.SRCCOPY)
+        bitmap.SaveBitmapFile(mem, path)
         return path
     except Exception:  # noqa: BLE001
         return None
+    finally:
+        # GDI handles are a finite, process-wide resource, and this runs on
+        # every failure path -- leaking them would degrade the next run.
+        for release in (
+            lambda: mem.DeleteDC() if mem is not None else None,
+            lambda: src.DeleteDC() if src is not None else None,
+            lambda: _release_dc(desktop, device) if desktop is not None else None,
+            lambda: _delete_object(bitmap) if bitmap is not None else None,
+        ):
+            try:
+                release()
+            except Exception:  # noqa: BLE001,S110
+                pass
+
+
+def _release_dc(desktop: int, device: int) -> None:
+    import win32gui
+
+    win32gui.ReleaseDC(desktop, device)
+
+
+def _delete_object(bitmap: object) -> None:
+    import win32gui
+
+    win32gui.DeleteObject(bitmap.GetHandle())
 
 
 def terminate(pids: Iterable[int], grace_s: float = 5.0) -> list[int]:

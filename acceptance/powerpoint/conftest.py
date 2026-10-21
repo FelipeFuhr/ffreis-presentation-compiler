@@ -44,7 +44,7 @@ def _missing_prerequisites() -> list[str]:
         # The rest cannot be probed off-Windows; one reason is enough.
         return missing
 
-    for module in ("win32com.client", "win32gui", "psutil", "PIL"):
+    for module in ("win32com.client", "win32gui", "win32ui", "psutil"):
         try:
             __import__(module)
         except ImportError as exc:

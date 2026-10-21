@@ -161,14 +161,14 @@ def open_in_powerpoint(
         if owned:
             dialogs = dialog_guard.visible_dialogs(owned)
             if dialogs:
-                shot = dialog_guard.screenshot(os.path.join(artifacts_dir, "dialog.png"))
+                shot = dialog_guard.screenshot(os.path.join(artifacts_dir, "dialog.bmp"))
                 break
 
         if time.monotonic() >= deadline:
             timed_out = True
             owned = _read_json(pid_path).get("pids") or []
             dialogs = dialog_guard.visible_dialogs(owned)
-            shot = dialog_guard.screenshot(os.path.join(artifacts_dir, "timeout.png"))
+            shot = dialog_guard.screenshot(os.path.join(artifacts_dir, "timeout.bmp"))
             break
 
         time.sleep(POLL_INTERVAL_S)
