@@ -174,10 +174,28 @@ func writeParts(z *zip.Writer, d Deck) error {
 
 // zipEpoch is a fixed, valid DOS timestamp.
 //
-// Leaving FileHeader.Modified at its zero value writes month 0, day 0 — not a
-// real date. A constant also keeps the output reproducible: the same deck
-// produces a byte-identical .pptx.
+// A constant keeps the output reproducible: the same deck produces a
+// byte-identical .pptx. It exists on FileHeader.Modified mainly for
+// readability — see zipModDate/zipModTime below for why Modified alone does
+// not reach the file.
 var zipEpoch = time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
+
+// zipModDate and zipModTime are zipEpoch, pre-encoded as the legacy MS-DOS
+// date/time pair the local and central-directory headers actually carry —
+// 1980-01-01 00:00, packed per the DOS format (year-1980<<9 | month<<5 |
+// day, hour<<11 | minute<<5 | second/2). Every part in this package silently
+// carried 0x0000/0x0000 — month 0, day 0, not a real date — until this was
+// added: Writer.CreateRaw (below) never converts FileHeader.Modified to
+// these fields the way CreateHeader does; that conversion lives entirely
+// inside CreateHeader, which this package deliberately does not call. A
+// zero DOS date is valid enough for python-pptx and LibreOffice to open
+// without complaint, but not for the stricter OPC/ZIP reader real
+// PowerPoint is built on, which is the one client this package cannot
+// afford to get wrong.
+const (
+	zipModDate uint16 = 1<<5 | 1 // month 1, day 1, year offset 0
+	zipModTime uint16 = 0
+)
 
 // add writes one part, with its CRC and sizes in the local header.
 //
@@ -192,7 +210,13 @@ var zipEpoch = time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
 // Images are stored rather than deflated: PNG is already compressed, so
 // deflating it again costs time and saves nothing.
 func add(z *zip.Writer, name string, body []byte) error {
-	header := &zip.FileHeader{Name: name, Modified: zipEpoch, Method: zip.Deflate}
+	header := &zip.FileHeader{
+		Name:         name,
+		Modified:     zipEpoch,
+		ModifiedDate: zipModDate,
+		ModifiedTime: zipModTime,
+		Method:       zip.Deflate,
+	}
 	payload := body
 
 	if path.Ext(name) == ".png" {

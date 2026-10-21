@@ -127,6 +127,48 @@ func TestLocalHeadersCarrySizes(t *testing.T) {
 	}
 }
 
+// TestLocalHeadersCarryAValidModDate guards the bug a real PowerPoint
+// install rejected and every tool used to develop this package did not:
+// Writer.CreateRaw never converts FileHeader.Modified into the legacy
+// MS-DOS ModifiedDate/ModifiedTime fields the way CreateHeader does — that
+// conversion lives entirely inside CreateHeader, which this package does
+// not call — so every entry silently carried 0x0000/0x0000, month 0 day 0,
+// until add() started setting the DOS fields directly. python-pptx,
+// LibreOffice and go's own zip.OpenReader all open a file with a zero DOS
+// date without complaint; the reader built into Windows/Office does not.
+func TestLocalHeadersCarryAValidModDate(t *testing.T) {
+	dst := writeDeck(t, pptx.Slide{PNG: onePixelPNG, Notes: "n"})
+	raw, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	checked := 0
+	for i := 0; i+30 < len(raw); i++ {
+		if string(raw[i:i+4]) != "PK\x03\x04" {
+			continue
+		}
+		modTime := binary.LittleEndian.Uint16(raw[i+10 : i+12])
+		modDate := binary.LittleEndian.Uint16(raw[i+12 : i+14])
+
+		if modDate == 0 {
+			t.Fatalf("entry at offset %d has MS-DOS date 0x0000 — month 0, day 0, not a real date", i)
+		}
+		// 1980-01-01: year offset 0, month 1, day 1 — see zipModDate.
+		wantDate := uint16(1<<5 | 1)
+		if modDate != wantDate {
+			t.Errorf("entry at offset %d has mod date %#04x, want %#04x (1980-01-01)", i, modDate, wantDate)
+		}
+		if modTime != 0 {
+			t.Errorf("entry at offset %d has mod time %#04x, want 0 (midnight)", i, modTime)
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("found no local file headers to check")
+	}
+}
+
 func TestWriteIsReproducible(t *testing.T) {
 	slides := []pptx.Slide{{PNG: onePixelPNG, Notes: "same"}}
 	first, err := os.ReadFile(writeDeck(t, slides...))
