@@ -169,6 +169,60 @@ func TestLocalHeadersCarryAValidModDate(t *testing.T) {
 	}
 }
 
+// TestHeadersDeclareARealZipVersion guards a second field CreateRaw leaves
+// unset the way it left ModifiedDate/ModifiedTime unset (see
+// TestLocalHeadersCarryAValidModDate): "version needed to extract" in every
+// local and central-directory header, and "version made by" in the central
+// directory. CreateHeader derives both from zipVersion20 unconditionally;
+// CreateRaw does not, so every entry declared version 0.0 until add() started
+// setting them directly. A client on Windows 7 hit the same "problema com o
+// conteúdo" repair prompt as the zero DOS date, on a file where every other
+// check this package and its development tools run — zipfile, unzip,
+// LibreOffice, python-pptx — found nothing wrong.
+func TestHeadersDeclareARealZipVersion(t *testing.T) {
+	dst := writeDeck(t, pptx.Slide{PNG: onePixelPNG, Notes: "n"})
+	raw, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+
+	const wantVersion = 20 // 2.0
+
+	checkedLocal := 0
+	for i := 0; i+30 < len(raw); i++ {
+		if string(raw[i:i+4]) != "PK\x03\x04" {
+			continue
+		}
+		versionNeeded := binary.LittleEndian.Uint16(raw[i+4 : i+6])
+		if versionNeeded != wantVersion {
+			t.Errorf("local header at offset %d declares version needed %#04x, want %#04x (2.0)", i, versionNeeded, wantVersion)
+		}
+		checkedLocal++
+	}
+	if checkedLocal == 0 {
+		t.Fatal("found no local file headers to check")
+	}
+
+	checkedCentral := 0
+	for i := 0; i+46 < len(raw); i++ {
+		if string(raw[i:i+4]) != "PK\x01\x02" {
+			continue
+		}
+		versionMadeBy := binary.LittleEndian.Uint16(raw[i+4 : i+6])
+		versionNeeded := binary.LittleEndian.Uint16(raw[i+6 : i+8])
+		if versionMadeBy&0xff != wantVersion {
+			t.Errorf("central directory entry at offset %d declares version made by %#04x, want low byte %#04x", i, versionMadeBy, wantVersion)
+		}
+		if versionNeeded != wantVersion {
+			t.Errorf("central directory entry at offset %d declares version needed %#04x, want %#04x (2.0)", i, versionNeeded, wantVersion)
+		}
+		checkedCentral++
+	}
+	if checkedCentral == 0 {
+		t.Fatal("found no central directory headers to check")
+	}
+}
+
 func TestWriteIsReproducible(t *testing.T) {
 	slides := []pptx.Slide{{PNG: onePixelPNG, Notes: "same"}}
 	first, err := os.ReadFile(writeDeck(t, slides...))

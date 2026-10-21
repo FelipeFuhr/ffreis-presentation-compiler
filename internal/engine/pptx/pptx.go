@@ -197,6 +197,24 @@ const (
 	zipModTime uint16 = 0
 )
 
+// zipVersion is "2.0", the version both the local and central-directory
+// headers declare for "version needed to extract" (and, in the central
+// directory, the low byte of "version made by") — the minimum version a
+// reader needs to know it can Deflate-decompress an entry.
+//
+// CreateHeader derives this unconditionally: `fh.ReaderVersion =
+// zipVersion20` and `fh.CreatorVersion = fh.CreatorVersion&0xff00 |
+// zipVersion20`. CreateRaw sets neither, so every entry in this package
+// silently declared version 0.0 — not a real ZIP version, just the Go zero
+// value — until this was added. python-pptx, LibreOffice and modern
+// PowerPoint read a declared version of zero without complaint; the OPC
+// parser in the Office install this shipped to on Windows 7 does not, and
+// rejected the whole package with a generic "problema com o conteúdo"
+// repair prompt — the same symptom as the zero DOS date above, caused the
+// same way, in a field none of this package's other verification tools
+// (zipfile, unzip, LibreOffice, python-pptx) check.
+const zipVersion uint16 = 20
+
 // add writes one part, with its CRC and sizes in the local header.
 //
 // This is the subtle part. archive/zip's ordinary Create/CreateHeader path
@@ -211,11 +229,13 @@ const (
 // deflating it again costs time and saves nothing.
 func add(z *zip.Writer, name string, body []byte) error {
 	header := &zip.FileHeader{
-		Name:         name,
-		Modified:     zipEpoch,
-		ModifiedDate: zipModDate,
-		ModifiedTime: zipModTime,
-		Method:       zip.Deflate,
+		Name:           name,
+		Modified:       zipEpoch,
+		ModifiedDate:   zipModDate,
+		ModifiedTime:   zipModTime,
+		CreatorVersion: zipVersion,
+		ReaderVersion:  zipVersion,
+		Method:         zip.Deflate,
 	}
 	payload := body
 
