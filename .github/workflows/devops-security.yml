@@ -49,12 +49,12 @@ jobs:
     uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-security.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
       runner: '["ubuntu-latest"]'
-      go-version: "1.26.9"
+      go-version: "1.26.10"
       # The callee runs govulncheck under its OWN toolchain input, which
       # defaults to 1.26.8 — still carrying GO-2026-6617 et al, all fixed at
       # 1.26.9. Without this the job fails on stdlib CVEs regardless of
       # go-version above.
-      govulncheck-go-version: "1.26.9"
+      govulncheck-go-version: "1.26.10"
       working-directory: "."
 
   semgrep:
@@ -88,5 +88,5 @@ jobs:
     uses: FelipeFuhr/ffreis-workflows-go/.github/workflows/go-lint.yml@7e462f7c9dc4b224f769582878f69b433d73e7ed # v1.7.0
     with:
       runner: '["ubuntu-latest"]'
-      go-version: "1.26.9"
+      go-version: "1.26.10"
       working-directory: "."
