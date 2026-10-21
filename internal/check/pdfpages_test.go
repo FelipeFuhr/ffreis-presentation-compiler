@@ -98,6 +98,10 @@ func TestComparePDFPages(t *testing.T) {
 		}
 		if finding == nil {
 			t.Fatal("want a finding when counts mismatch")
+			// Unreachable -- t.Fatal exits the goroutine. Explicit so staticcheck
+			// can prove the dereference below is non-nil (SA5011): the official
+			// 2.11.4 release build reports it even though a local build does not.
+			return
 		}
 		if finding.Slide != 0 {
 			t.Errorf("Slide = %d, want 0 (deck-level, like font-fallback)", finding.Slide)

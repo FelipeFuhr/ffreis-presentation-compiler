@@ -224,6 +224,10 @@ func TestCheckPDFPageCountComparesWhenAPDFWasProduced(t *testing.T) {
 		}
 		if finding == nil {
 			t.Fatal("want a finding when the pdf page count does not match the slide count")
+			// Unreachable -- t.Fatal exits the goroutine. Explicit so staticcheck
+			// can prove the dereference below is non-nil (SA5011): the official
+			// 2.11.4 release build reports it even though a local build does not.
+			return
 		}
 		if finding.Rule != check.RulePDFPages {
 			t.Errorf("Rule = %q, want %q", finding.Rule, check.RulePDFPages)
