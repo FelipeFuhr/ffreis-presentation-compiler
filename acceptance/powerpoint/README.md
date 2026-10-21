@@ -103,7 +103,10 @@ committed.
 3. **Enable autologon** so the VM boots to a logged-on interactive desktop.
    The host checks for an active console session and aborts with exit 3 if
    there is none.
-4. **Install Python** (3.8 is the ceiling on Windows 7/8.1), tick "Add to
+4. **Install Python 3.10 or newer** — the pinned pytest requires it, so the
+   VM must be Windows 10 or newer. That constrains the *Windows* version, not
+   the PowerPoint version: old PowerPoint (2013/2016/2019) installs fine on
+   Windows 10, and the PowerPoint version is what this measures. Tick "Add to
    PATH", then install the pinned dependencies:
 
    ```bat
@@ -136,9 +139,10 @@ one crash leaves recovery documents and a Document Recovery pane that
 change what the next open does — so resetting is what makes two runs
 comparable.
 
-Keep a second profile matching the version that actually rejected a file.
-An old PowerPoint tests old behaviour; only the version a reader complained
-about can confirm a fix for that reader.
+Keep a second profile matching the PowerPoint version that actually rejected
+a file. An old PowerPoint tests old behaviour; only the version a reader
+complained about can confirm a fix for that reader — and it can usually be
+installed on a supported Windows, which is the cheaper way to get it.
 
 ## How it works
 

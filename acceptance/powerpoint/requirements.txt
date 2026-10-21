@@ -4,17 +4,24 @@
 # instrument -- if it drifts, a red run is ambiguous between "the compiler
 # regressed" and "pywin32 changed". Bump deliberately.
 #
-# Ceiling to be aware of: an older Windows (7/8.1) tops out at Python 3.8, and
-# these pins are the newest that still support it. A VM profile for an older
-# PowerPoint is exactly where that matters -- see README.md.
+# pytest 9.0.3 is the floor, not a preference: everything below it carries
+# GHSA-6w46-j5rx-g56g (world-writable tmpdir), which dependency-review fails
+# the build on. It requires **Python 3.10+**, so the VM must be Windows 10 or
+# newer.
+#
+# That is not the limitation it sounds like. What this harness measures is a
+# PowerPoint version, not a Windows version, and old PowerPoint (2013 / 2016 /
+# 2019) installs happily on Windows 10. Only a profile that must reproduce an
+# older *Windows* is affected -- Windows 7 tops out at Python 3.8 -- and that
+# profile would have to pin an older pytest and knowingly accept the advisory.
+# Prefer reproducing the PowerPoint version on a supported Windows.
 #
 # Deliberately NOT here: Pillow. It was carried for a screenshot and a
 # "is this PNG readable" check, and brought a dozen critical/high advisories
 # (heap overflows in the TIFF and JPEG decoders, argument injection into
-# Ghostscript) for decoders this harness never touches -- dependency-review
-# fails the build on them, correctly. GDI through pywin32 takes the
-# screenshot and pngcheck.py validates the exports with the standard
+# Ghostscript) for decoders this harness never touches. GDI through pywin32
+# takes the screenshot and pngcheck.py validates the exports with the standard
 # library, more strictly than Image.verify() did.
-pytest==8.3.5
-pywin32==306
-psutil==6.1.1
+pytest==9.0.3
+pywin32==312
+psutil==7.2.2
