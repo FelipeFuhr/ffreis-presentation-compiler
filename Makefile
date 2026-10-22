@@ -44,7 +44,7 @@ MUTATION_THRESHOLD ?= 60
 	validate-deck validate-selftest \
 	seo-selftest seo-audit \
 	golden golden-update review metrics \
-	pptx-acceptance acceptance-test acceptance-selftest
+	pptx-acceptance acceptance-test acceptance-selftest ooxml-validate
 
 ## mutation: run mutation testing with gremlins (slow — CI only)
 mutation:
@@ -440,6 +440,30 @@ acceptance-test: ## Run the PowerPoint harness's own portable tests (no Windows 
 	@cd $(ACCEPTANCE_DIR) && uv run --no-project --with "pytest==$(ACCEPTANCE_PYTEST)" -- \
 		python -m pytest -q -p no:cacheprovider
 	@echo "acceptance-test: ok -- the Windows-only tests skipped, as they must off-Windows"
+
+# ── Microsoft's own OOXML stack (optional) ───────────────────────────────────
+#
+# tools/ooxml-validate is a small .NET app over the Open XML SDK. It is the
+# nearest free thing to the reader whose opinion matters, and its limits are
+# exact: it catches PresentationML schema defects with the part and XPath, and
+# it ACCEPTS the package a desktop PowerPoint refused -- the container fields
+# that defect lived in are advisory, and .NET's ZipArchive ignores them like
+# everything else does.
+OOXML_DIR ?= tools/ooxml-validate
+OOXML_BIN ?= $(OOXML_DIR)/bin/Release/net8.0/ooxml-validate
+DOTNET    ?= dotnet
+
+ooxml-validate: ## Validate a pptx with Microsoft's Open XML SDK: make ooxml-validate PPTX=<file>
+	@[ -n "$(PPTX)" ] || { echo "usage: make ooxml-validate PPTX=<file.pptx>" >&2; exit 2; }
+	@command -v $(DOTNET) >/dev/null 2>&1 || { \
+		echo "ooxml-validate: $(DOTNET) is not installed -- this target FAILS rather than" >&2; \
+		echo "  skipping, because a skip that reads as a pass is how a gate stops gating." >&2; \
+		echo "  Install without root: curl -fsSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 8.0" >&2; \
+		echo "  then export DOTNET_ROOT=\$$HOME/.dotnet and PATH=\$$HOME/.dotnet:\$$PATH" >&2; \
+		exit 1; \
+	}
+	@$(DOTNET) build -c Release -v q --nologo "$(OOXML_DIR)" >/dev/null
+	@"$(OOXML_BIN)" "$(PPTX)"
 
 acceptance-selftest: ## Prove the acceptance orchestrator works, without Windows
 	@./$(ACCEPTANCE_DIR)/selftest.sh

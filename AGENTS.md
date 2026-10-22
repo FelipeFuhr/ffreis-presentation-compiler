@@ -426,6 +426,37 @@ Measured against the real history: the file with the zero zip version reports
 only the shared theme reports 1, and the current output reports 0 — as do
 PowerPoint's own repaired copy of our file and a python-pptx-authored deck.
 
+## Which readers are strict (`tools/ooxml-validate`)
+
+Six readers have now been measured against the defects this writer shipped,
+and **only one is strict**:
+
+| Reader | zero zip version | shared theme part |
+| --- | --- | --- |
+| `zipfile` / `unzip -t` | accepted | n/a |
+| python-pptx | accepted | accepted |
+| LibreOffice | accepted | accepted |
+| Go `archive/zip` | accepted | n/a |
+| Microsoft Open XML SDK | accepted | accepted |
+| **desktop PowerPoint** | **refused** | **repaired** |
+
+**So LibreOffice is not a proxy, and nor is Microsoft's own SDK.** The obvious
+idea — run LibreOffice or OpenOffice on Windows instead of Linux — changes the
+OS and not the parser, and that parser is 0 for 4 on these defects.
+
+`tools/ooxml-validate` is a small .NET app over `System.IO.Packaging` and the
+Open XML SDK: Microsoft's code rather than a reimplementation. Its value is
+real and narrow, and was measured rather than assumed — it catches a missing
+`[Content_Types].xml`, an invalid child element (naming the part and XPath)
+and a missing required element, and it **accepts the package PowerPoint
+refused**, because `.NET`'s own `ZipArchive` ignores the advisory version
+field like everything else. `make ooxml-validate PPTX=<file>`; `make doctor`
+reports whether `dotnet` is present.
+
+The container invariants are therefore not delegated to it. They are held by
+`verify.go`, which `Write` runs on its own output — the only check in this
+repo that is stricter than every reader available.
+
 ## PowerPoint acceptance (`acceptance/powerpoint/`)
 **Two runtimes, and the blocker is neither of them.** A profile picks
 `RUNTIME=container` (dockur/windows under podman, which downloads its own
