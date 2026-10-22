@@ -74,7 +74,7 @@
       "effect": "toggle",
       "default": "error",
       "rule": "output-gate-exists",
-      "seam": "Makefile smoke-check (PDF page count == slide count, page size unchanged) + internal/check ComparePDFPages, which build runs automatically whenever -formats produced a PDF + Makefile export-selftest (LibreOffice round-trip of the generated pptx) + internal/engine/pptx/pptx_test.go byte-level local/central header assertions (data-descriptor bit, DOS date, declared zip version) + Makefile pptx-acceptance (real desktop PowerPoint, opt-in)",
+      "seam": "Makefile smoke-check (PDF page count == slide count, page size unchanged) + internal/check ComparePDFPages, which build runs automatically whenever -formats produced a PDF + Makefile export-selftest (LibreOffice round-trip of the generated pptx) + internal/engine/pptx/verify.go, which Write runs on its own output before renaming it into place (16 rules: container, package and presentation-graph; TestVerifyCatchesEveryDefect fails unless each one fires) + Makefile pptx-acceptance (real desktop PowerPoint, opt-in)",
       "output_target": [
         "document-export",
         "raster-export"
@@ -88,8 +88,8 @@
         },
         {
           "scope": "whether desktop Microsoft PowerPoint opens the generated pptx, on any machine with no provisioned Windows+Office VM",
-          "reason": "export-selftest asks LibreOffice, which is lenient about exactly the fields a strict OPC parser rejects: it accepted a package whose every entry declared zip version 0.0, and a desktop PowerPoint then refused the whole file with a generic repair prompt. It also exit-0s when soffice is absent and no workflow runs it, so its silence means nothing. make pptx-acceptance closes the gap with real PowerPoint, but needs a licensed Windows and Office image that cannot live in this repo and a runner that does not exist in this fleet, so it is opt-in and no automatic gate covers this output. The portable half of the class is now held by the byte-level header assertions in pptx_test.go.",
-          "added": "2026-10-21"
+          "reason": "export-selftest asks LibreOffice, which is lenient about exactly the fields a strict OPC parser rejects, exit-0s when soffice is absent, and is run by no workflow. make pptx-acceptance closes the gap with real PowerPoint but needs a licensed Windows and Office image that cannot live in this repo and a runner that does not exist in this fleet, so it is opt-in and HAS NEVER BEEN RUN. What now covers the portable half is internal/engine/pptx/verify.go: Write refuses to emit a package that fails any of its 16 rules, which is every defect this writer has shipped plus the package-graph checks an audit used to have to do by hand. What it cannot cover is a reader's opinion -- whether a given PowerPoint accepts a conformant file is only answerable by that PowerPoint.",
+          "added": "2026-10-22"
         }
       ]
     },
