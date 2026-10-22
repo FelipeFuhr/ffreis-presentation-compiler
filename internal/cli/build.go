@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -31,6 +32,8 @@ type buildOptions struct {
 	out       string
 	formats   string
 	pptxMode  string
+	pptxFont  string
+	embedFont bool
 	slug      string
 	lang      string
 	verbose   bool
@@ -44,6 +47,11 @@ func parseBuildOptions(args []string, stderr io.Writer) (*buildOptions, error) {
 	fs.StringVar(&o.themeRoot, "theme-root", "", "directory holding themes, one subdirectory per theme")
 	fs.StringVar(&o.out, "out", "dist", "output directory")
 	fs.StringVar(&o.formats, "formats", "html,pdf", "comma-separated outputs: html, pdf, png, pptx")
+	fs.StringVar(&o.pptxFont, "pptx-font", "",
+		"typeface every pptx run names; empty uses the theme's pptx_font, then what the render measured")
+	fs.BoolVar(&o.embedFont, "pptx-embed-fonts", false,
+		"ship the theme's pptx/fonts/*.ttf inside the package (UNVERIFIED: PowerPoint writes EOT, "+
+			"this writes sfnt, and no reader available here honours embedded pptx fonts at all)")
 	fs.StringVar(&o.pptxMode, "pptx-mode", string(pptxlayout.ModeNative),
 		"pptx shape mode: native (editable; geometry from the theme's pptx/ specs) or image (exact; one picture per slide)")
 	fs.StringVar(&o.slug, "slug", "", "artifact basename (default: the deck directory name)")
@@ -155,21 +163,58 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		// should carry when the invocation names none.
 		Lang: d.Language(opts.lang),
 	}
+	font := resolvePPTXFont(opts.pptxFont, th)
+
 	shapes, notes, err := nativeShapes(context.Background(), pptxMode, d, th,
-		opts.deckRoot, index, size, wants(formats, engine.FormatPPTX))
+		opts.deckRoot, index, size, wants(formats, engine.FormatPPTX), font)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
 		return exitError
 	}
-	for _, note := range notes {
+
+	// With no typeface declared, the theme's fontScheme takes the one the runs
+	// actually use -- which measurement read from the CSS. Without this the
+	// scheme fell back to DefaultFont while the runs named the measured face,
+	// so the package disagreed with itself about its own typeface.
+	if font == "" {
+		font = dominantFont(shapes)
+	}
+
+	embedded, fontNotes, err := loadEmbeddedFonts(opts.embedFont, th, font)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
+		return exitError
+	}
+	for _, note := range append(fontNotes, notes...) {
 		logger.Info("pptx", "note", note)
 	}
 
 	paths, err := renderFormats(context.Background(), formats, job,
-		pptxOptions{notes: speakerNotes(d), shapes: shapes}, stdout)
+		pptxOptions{notes: speakerNotes(d), shapes: shapes, font: font, fonts: embedded}, stdout)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
 		return exitError
+	}
+
+	// Say what a reader will actually see. A typeface that is neither embedded
+	// nor one Office ships substitutes silently on someone else's machine,
+	// which is the one thing about a .pptx that cannot be checked by looking
+	// at it here -- so it is reported rather than left to be discovered.
+	if pptxPath, ok := paths[engine.FormatPPTX]; ok {
+		reports, err := pptx.Fonts(pptxPath)
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
+			return exitError
+		}
+		for _, r := range reports {
+			if r.Safe() {
+				logger.Info("pptx", "font", r.String())
+				continue
+			}
+			// Loud, and on stderr: this is the difference between the deck the
+			// author saw and the deck the reader gets.
+			_, _ = fmt.Fprintf(stderr, "build: warning: %s\n", r)
+		}
 	}
 
 	// A silently dropped or doubled PDF page is invisible until someone
@@ -269,6 +314,8 @@ func speakerNotes(d *deck.Deck) map[int]string {
 type pptxOptions struct {
 	notes  map[int]string
 	shapes map[int][]pptx.Shape
+	font   string
+	fonts  []pptx.EmbeddedFont
 }
 
 func renderFormats(ctx context.Context, formats []engine.Format, job engine.Job, opt pptxOptions, stdout io.Writer) (map[engine.Format]string, error) {
@@ -290,6 +337,99 @@ func renderFormats(ctx context.Context, formats []engine.Format, job engine.Job,
 		paths[f] = abs
 	}
 	return paths, nil
+}
+
+// dominantFont is the typeface most of a deck's shapes name.
+//
+// Most, not first: a deck whose body is one face and whose kickers are another
+// should declare the body face in its theme, since that is what a reader
+// changing the theme font would expect to affect. Ties go to the
+// alphabetically first name so the output stays reproducible.
+func dominantFont(shapes map[int][]pptx.Shape) string {
+	count := map[string]int{}
+	for _, slide := range shapes {
+		for _, sh := range slide {
+			if f := strings.TrimSpace(sh.Style.Font); f != "" {
+				count[f]++
+			}
+		}
+	}
+	best, bestN := "", 0
+	for face, n := range count {
+		if n > bestN || (n == bestN && face < best) {
+			best, bestN = face, n
+		}
+	}
+	return best
+}
+
+// resolvePPTXFont decides the one typeface a .pptx can name.
+//
+// The flag wins, then the theme's own declaration, then empty -- which leaves
+// each run with whatever the render measured. Empty is the right default: a
+// theme whose CSS face is safe (embedded, or one Office ships) should not have
+// to restate it.
+func resolvePPTXFont(flag string, th *theme.Theme) string {
+	if strings.TrimSpace(flag) != "" {
+		return strings.TrimSpace(flag)
+	}
+	if th != nil {
+		return strings.TrimSpace(th.PPTXFont)
+	}
+	return ""
+}
+
+// loadEmbeddedFonts reads the theme's sfnt files for embedding.
+//
+// Reports rather than fails when asked to embed a theme that ships no font
+// files: the request is a preference, and refusing to build over it would be
+// worse than building a deck whose typeface may substitute -- which is the
+// state every deck was in before this existed, and which Fonts() names.
+func loadEmbeddedFonts(embed bool, th *theme.Theme, typeface string) ([]pptx.EmbeddedFont, []string, error) {
+	if !embed || th == nil {
+		return nil, nil, nil
+	}
+	files, err := th.PPTXFonts()
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(files) == 0 {
+		return nil, []string{fmt.Sprintf(
+			"-pptx-embed-fonts was asked for but theme %q ships no sfnt files in %s, so nothing was embedded",
+			th.Name, theme.PPTXFontDir)}, nil
+	}
+
+	face := typeface
+	if face == "" {
+		// Embedding needs a name to declare, and an unnamed embedded font is
+		// one nothing can reference.
+		face = pptx.DefaultFont
+		if len(th.Fonts) > 0 && strings.TrimSpace(th.Fonts[0]) != "" {
+			face = strings.TrimSpace(th.Fonts[0])
+		}
+	}
+
+	out := pptx.EmbeddedFont{Typeface: face}
+	var loaded []string
+	for _, f := range files {
+		body, err := os.ReadFile(f.Path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("read %s: %w", f.Path, err)
+		}
+		switch f.Variant {
+		case "regular":
+			out.Regular = body
+		case "bold":
+			out.Bold = body
+		case "italic":
+			out.Italic = body
+		case "boldItalic":
+			out.BoldItalic = body
+		}
+		loaded = append(loaded, f.Variant)
+	}
+	return []pptx.EmbeddedFont{out}, []string{fmt.Sprintf(
+		"embedding %s (%s) so the typeface cannot substitute", face, strings.Join(loaded, ", "))}, nil
 }
 
 // wants reports whether f is among the requested formats.
@@ -320,7 +460,7 @@ func defaultMeasureSlides(ctx context.Context, pageURL string, selectors []strin
 // a correct-but-flat slide rather than a build failure or a wrong table. A
 // deck is therefore allowed to be partly editable while specs are written.
 func nativeShapes(ctx context.Context, mode pptxlayout.Mode, d *deck.Deck, th *theme.Theme,
-	deckRoot, index string, size deck.Size, wantPPTX bool) (map[int][]pptx.Shape, []string, error) {
+	deckRoot, index string, size deck.Size, wantPPTX bool, font string) (map[int][]pptx.Shape, []string, error) {
 	// No .pptx requested means no shapes are needed, and measuring would
 	// launch a browser for an artifact nobody asked for.
 	if mode != pptxlayout.ModeNative || !wantPPTX {
@@ -356,6 +496,7 @@ func nativeShapes(ctx context.Context, mode pptxlayout.Mode, d *deck.Deck, th *t
 	}
 
 	opt := pptxlayout.Options{
+		Font:     font,
 		Deck:     d,
 		DeckRoot: deckRoot,
 		ThemeDir: th.Dir,
@@ -414,6 +555,8 @@ func defaultRendererFor(f engine.Format, opt pptxOptions) (engine.Renderer, erro
 		r := engine.NewPPTXRenderer()
 		r.Notes = opt.notes
 		r.Shapes = opt.shapes
+		r.Font = opt.font
+		r.EmbeddedFonts = opt.fonts
 		return r, nil
 	default:
 		return nil, fmt.Errorf("format %q is declared but has no adapter yet", f)

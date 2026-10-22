@@ -320,6 +320,60 @@ its silence means nothing. Treat it as one lenient reader's opinion, not as
 proof the file opens. The reader whose opinion actually matters is the one
 below.
 
+## Typefaces
+
+**OOXML names exactly one typeface per run and has no fallback stack.** The CSS
+`Roboto, sans-serif` cannot be expressed; a machine without the named face
+substitutes silently, and the deck arrives in something else. So the typeface
+is a decision, not an inheritance:
+
+1. `-pptx-font` wins.
+2. Then the theme's own `pptx_font:`.
+3. Then the face the render measured, which is what the runs use anyway — this
+   is what keeps the theme's `fontScheme` and the runs agreeing. They did not
+   at first: the scheme fell back to `DefaultFont` while the runs named the
+   measured face, so the package disagreed with itself.
+4. Then `pptx.DefaultFont`, which is **Calibri** — chosen only because Office
+   ships it and it therefore cannot substitute.
+
+**`theme1.xml` is a template, not a finished asset.** Its `fontScheme` used to
+hardcode `Roboto` — one consumer's font inside a consumer-agnostic compiler,
+the same leak as this package's old `pt-BR` notes default. The typeface is
+substituted at write time and the placeholder is **required**: if an edit to
+the asset drops it, `themeXML` fails rather than shipping whatever face the
+asset happened to name.
+
+**Every build reports what a reader will actually see.** `pptx.Fonts` lists
+each typeface the package names and whether it is embedded, ships with Office,
+or will substitute — the last is a warning on stderr, because it is the
+difference between the deck the author saw and the deck the reader gets.
+`+mj-lt`/`+mn-lt` are skipped: they are references *into* the fontScheme, and
+reporting them was a false positive on every build.
+
+### Embedding is implemented and unproven — read this before relying on it
+
+`-pptx-embed-fonts` ships a theme's `pptx/fonts/*.ttf` inside the package as
+`ppt/fonts/*.fntdata`. The structure is verified (`font-embedding` rule: every
+declaration resolves to real, typed, non-empty data, and no orphan font parts).
+**Whether PowerPoint reads it is not known, and could not be determined here.**
+
+- The data written is plain **sfnt**. ECMA-376 calls the part "font data" and
+  mandates no container.
+- PowerPoint writes **EOT** instead: a real `.pptx` to hand has `.fntdata`
+  beginning with an EOT header (size, font-data size, version `0x00020002`)
+  wrapping MTX-compressed data, with no sfnt table tags anywhere.
+- **The experiment that would settle it cannot be run.** A font renamed to a
+  unique family, embedded, converted by LibreOffice: substituted. The control
+  — the real-world `.pptx` carrying Microsoft's own EOT fonts for a typeface
+  not installed on this machine — converted by the same LibreOffice:
+  substituted too. **LibreOffice ignores embedded `.pptx` fonts regardless of
+  format**, which removes the only reader available.
+
+So writing an EOT encoder would be binary-format code with no way to tell
+whether it worked. Embedding stays off by default, the answer a deck should
+rely on is naming a face the reader has, and testing this is the first thing
+worth doing with a licensed PowerPoint (see `acceptance/powerpoint`).
+
 ## Self-verification (`internal/engine/pptx/verify.go`)
 
 **`Write` verifies its own output before renaming the temp file into place**, so

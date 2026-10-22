@@ -30,6 +30,13 @@ type PPTXRenderer struct {
 	// a deck can be partly editable: a layout the theme has not described in
 	// PPTX terms falls back rather than failing.
 	Shapes map[int][]pptx.Shape
+	// Font is the typeface the theme's fontScheme should declare, and
+	// EmbeddedFonts the data to ship with the package so it cannot
+	// substitute. Both travel here rather than on the Job because they are
+	// properties of the .pptx specifically -- the PDF resolves fonts through
+	// the browser and needs neither.
+	Font          string
+	EmbeddedFonts []pptx.EmbeddedFont
 }
 
 // NewPPTXRenderer returns a PPTX adapter backed by headless Chrome.
@@ -81,7 +88,13 @@ func (r *PPTXRenderer) Render(ctx context.Context, job Job) (string, error) {
 		return "", fmt.Errorf("pptx: %w", err)
 	}
 
-	deck := pptx.Deck{WidthIn: job.Size.WidthIn, HeightIn: job.Size.HeightIn, Lang: job.Lang}
+	deck := pptx.Deck{
+		WidthIn:       job.Size.WidthIn,
+		HeightIn:      job.Size.HeightIn,
+		Lang:          job.Lang,
+		Font:          r.Font,
+		EmbeddedFonts: r.EmbeddedFonts,
+	}
 	for _, shot := range shots {
 		deck.Slides = append(deck.Slides, pptx.Slide{
 			PNG:    shot.PNG,

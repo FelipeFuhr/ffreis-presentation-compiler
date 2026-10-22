@@ -319,6 +319,12 @@ type Options struct {
 	Tokens map[string]string
 	// ThemeDir resolves an Asset. Contained, like DeckRoot.
 	ThemeDir string
+	// Font, when set, is the typeface every run uses, overriding whatever the
+	// render measured. A theme sets it when its CSS face is not one the
+	// reader's machine can be assumed to have: OOXML names one face with no
+	// fallback, so that choice has to be made deliberately rather than
+	// inherited from a CSS stack the browser resolved locally.
+	Font string
 	// Deck resolves the `deck.*` intrinsics below. A layout's chrome is not
 	// all per-slide -- the footer text and the cover's title live on the deck
 	// -- and a spec that could not reach them would leave a visible hole.
@@ -445,6 +451,14 @@ func one(sp ShapeSpec, s deck.Slide, opt Options) (pptx.Shape, bool, error) {
 		base.Style = specStyle(override(sp.Style, measuredStyle(el)), opt.Tokens)
 		grid = el.Grid
 		measured = true
+	}
+
+	// The deck-wide typeface applies to every shape, measured or not. It was
+	// first applied only on the measured path, which left a spec written with
+	// absolute geometry naming no typeface at all -- the runs then resolved
+	// against PowerPoint's own default rather than the theme's.
+	if opt.Font != "" {
+		base.Style.Font = opt.Font
 	}
 
 	switch strings.ToLower(sp.Kind) {

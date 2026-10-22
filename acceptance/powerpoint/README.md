@@ -221,6 +221,27 @@ ships `check-selftest` and `validate-selftest`.
 If that test ever fails, **every pass in the file is void** until it is
 explained.
 
+## Font embedding: the first thing to test here
+
+`-pptx-embed-fonts` writes plain sfnt into `ppt/fonts/*.fntdata`. PowerPoint
+itself writes EOT there. **Which one PowerPoint will read is unknown**, and it
+cannot be determined without a PowerPoint: LibreOffice ignores embedded
+`.pptx` fonts regardless of format — verified against a real file carrying
+Microsoft's own EOT fonts for a typeface not installed on the test machine,
+which it substituted anyway.
+
+So when a licensed PowerPoint is available, this is the highest-value thing to
+point it at:
+
+1. Build with `-pptx-embed-fonts` and a typeface the VM does **not** have
+   installed, so substitution is detectable.
+2. Open it and check whether the text renders in that face.
+3. If it substitutes, the format is wrong and EOT is the next thing to try —
+   and at that point there is finally an oracle to develop it against.
+
+Until then, treat the typeface named in a deck as the thing that matters, and
+read the font warning every build prints.
+
 ## The zip-version diagnostic
 
 `test_report_whether_this_powerpoint_rejects_zip_version_zero` rebuilds the

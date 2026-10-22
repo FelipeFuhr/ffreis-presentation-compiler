@@ -64,6 +64,7 @@ const (
 	RuleThemePerMaster     = "theme-per-master"
 	RuleSlideSize          = "slide-size"
 	RuleMediaIntegrity     = "media-integrity"
+	RuleFontEmbedding      = "font-embedding"
 )
 
 // Namespaces. Declared once; the attribute scan below compares against them.
@@ -164,6 +165,7 @@ func VerifyBytes(raw []byte) ([]Finding, error) {
 	findings = append(findings, checkPresentation(parts, bodies, rels)...)
 	findings = append(findings, checkThemePerMaster(parts, rels)...)
 	findings = append(findings, checkMedia(parts, bodies)...)
+	findings = append(findings, checkFonts(parts, bodies, rels)...)
 
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Rule != findings[j].Rule {
@@ -806,4 +808,172 @@ func checkMedia(names []string, bodies map[string][]byte) []Finding {
 		}
 	}
 	return out
+}
+
+// ── fonts ───────────────────────────────────────────────────────────────────
+
+var reFontPart = regexp.MustCompile(`^ppt/fonts/.+\.fntdata$`)
+
+// reEmbeddedFont matches one <p:embeddedFont> block, and reLatin a run's
+// declared typeface. Regex rather than a parser: these are two shapes in a
+// document this package wrote itself, and unmarshalling presentation.xml into
+// a struct would need the whole schema to reach two of its elements.
+var (
+	reEmbeddedFont = regexp.MustCompile(`(?s)<p:embeddedFont>(.*?)</p:embeddedFont>`)
+	reFontTypeface = regexp.MustCompile(`<p:font typeface="([^"]*)"`)
+	reFontVariant  = regexp.MustCompile(`<p:(regular|bold|italic|boldItalic) r:id="([^"]+)"`)
+	reLatin        = regexp.MustCompile(`<a:latin typeface="([^"]*)"`)
+)
+
+// checkFonts holds the structure of an embedded typeface.
+//
+// Whether a typeface will SUBSTITUTE is not checked here: a package naming a
+// font the reader lacks is not malformed, it is a trade-off, and Fonts()
+// reports it so a build can say so. What is malformed is a font declaration
+// that does not resolve -- an <p:embeddedFont> whose data is missing reaches
+// PowerPoint as a font it was promised and cannot find.
+func checkFonts(names []string, bodies map[string][]byte, rels map[string]map[string]relationship) []Finding {
+	var out []Finding
+	const presPart = "ppt/presentation.xml"
+	body, ok := bodies[presPart]
+	if !ok {
+		return nil
+	}
+	pres := string(body)
+	table := rels[presPart]
+	present := map[string]bool{}
+	for _, n := range names {
+		present[n] = true
+	}
+
+	for _, block := range reEmbeddedFont.FindAllStringSubmatch(pres, -1) {
+		typeface := ""
+		if m := reFontTypeface.FindStringSubmatch(block[1]); m != nil {
+			typeface = m[1]
+		}
+		if strings.TrimSpace(typeface) == "" {
+			out = append(out, Finding{Rule: RuleFontEmbedding, Part: presPart,
+				Detail: "an embedded font declares no typeface, so nothing can reference it"})
+		}
+
+		variants := reFontVariant.FindAllStringSubmatch(block[1], -1)
+		if len(variants) == 0 {
+			out = append(out, Finding{Rule: RuleFontEmbedding, Part: presPart,
+				Detail: fmt.Sprintf("embedded font %q declares no font data", typeface)})
+		}
+		for _, v := range variants {
+			rel, found := table[v[2]]
+			if !found {
+				out = append(out, Finding{Rule: RuleFontEmbedding, Part: presPart,
+					Detail: fmt.Sprintf("embedded font %q names %s for its %s, which has no relationship",
+						typeface, v[2], v[1])})
+				continue
+			}
+			target := path.Join("ppt", rel.Target)
+			if !present[target] {
+				out = append(out, Finding{Rule: RuleFontEmbedding, Part: presPart,
+					Detail: fmt.Sprintf("embedded font %q points at %s, which the package does not contain",
+						typeface, target)})
+				continue
+			}
+			if len(bodies[target]) == 0 {
+				out = append(out, Finding{Rule: RuleFontEmbedding, Part: target,
+					Detail: fmt.Sprintf("embedded font %q has an empty data part", typeface)})
+			}
+			if rel.Type != fontRelType {
+				out = append(out, Finding{Rule: RuleFontEmbedding, Part: presPart,
+					Detail: fmt.Sprintf("embedded font %q uses %s, whose relationship type is %s, not a font",
+						typeface, v[2], rel.Type)})
+			}
+		}
+	}
+
+	// A font part nothing declares is dead weight travelling in the package,
+	// and usually means a declaration was dropped rather than the data.
+	declared := map[string]bool{}
+	for _, rel := range table {
+		if rel.Type == fontRelType {
+			declared[path.Join("ppt", rel.Target)] = true
+		}
+	}
+	for _, n := range names {
+		if reFontPart.MatchString(n) && !declared[n] {
+			out = append(out, Finding{Rule: RuleFontEmbedding, Part: n,
+				Detail: "font data that no embeddedFont declaration references"})
+		}
+	}
+
+	// An empty typeface in a run is not "inherit", it is a run that names
+	// nothing, and PowerPoint resolves it to its own default rather than the
+	// theme's.
+	for _, n := range names {
+		if !strings.HasPrefix(n, "ppt/slides/slide") && n != "ppt/theme/theme1.xml" {
+			continue
+		}
+		for _, m := range reLatin.FindAllStringSubmatch(string(bodies[n]), -1) {
+			if strings.TrimSpace(m[1]) == "" {
+				out = append(out, Finding{Rule: RuleFontEmbedding, Part: n,
+					Detail: "a run or fontScheme declares an empty typeface"})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// Fonts reports, for every typeface the package names, whether a reader will
+// actually see it.
+//
+// This is the honest answer to "will the fonts work": a typeface is safe when
+// the package carries it or when it ships with Windows or Office, and
+// otherwise it will substitute on some machine. Reported rather than enforced
+// -- naming a font the reader lacks is a trade-off a deck is allowed to make,
+// as long as it is made knowingly.
+func Fonts(path string) ([]FontReport, error) {
+	raw, err := os.ReadFile(path) //nolint:gosec // the package this writer produced, or a path the operator named
+	if err != nil {
+		return nil, fmt.Errorf("pptx: fonts %s: %w", path, err)
+	}
+	entries, err := parseCentralDirectory(raw)
+	if err != nil {
+		return nil, err
+	}
+	names, bodies, _ := inflate(raw, entries)
+
+	embedded := map[string]bool{}
+	for _, block := range reEmbeddedFont.FindAllStringSubmatch(string(bodies["ppt/presentation.xml"]), -1) {
+		if m := reFontTypeface.FindStringSubmatch(block[1]); m != nil {
+			embedded[strings.ToLower(m[1])] = true
+		}
+	}
+
+	seen := map[string]bool{}
+	var out []FontReport
+	for _, n := range names {
+		if !strings.HasSuffix(n, ".xml") || strings.HasSuffix(n, ".rels") {
+			continue
+		}
+		for _, m := range reLatin.FindAllStringSubmatch(string(bodies[n]), -1) {
+			face := strings.TrimSpace(m[1])
+			if face == "" || seen[strings.ToLower(face)] {
+				continue
+			}
+			// "+mj-lt" and "+mn-lt" are references INTO the theme's
+			// fontScheme, not typeface names: the master and layouts use them
+			// so a theme change repoints every run. Reporting them as fonts
+			// nobody has was a false positive on every single build, which is
+			// how a warning stops being read.
+			if strings.HasPrefix(face, "+") {
+				continue
+			}
+			seen[strings.ToLower(face)] = true
+			out = append(out, FontReport{
+				Typeface:       face,
+				Embedded:       embedded[strings.ToLower(face)],
+				AssumedPresent: AssumedPresent(face),
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Typeface < out[j].Typeface })
+	return out, nil
 }

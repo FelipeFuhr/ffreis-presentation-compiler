@@ -34,6 +34,16 @@ type Theme struct {
 	// falling back to a system font.
 	Fonts []string `yaml:"fonts"`
 
+	// PPTXFont is the typeface a native .pptx should name.
+	//
+	// Separate from Fonts because the two answer different questions. Fonts is
+	// a CSS stack the browser resolves with fallbacks; OOXML names exactly one
+	// face and has no fallback, so a theme whose CSS font is not on the
+	// reader's machine needs a deliberate second choice. Empty means "use
+	// what the render measured", which is right when that face is embedded or
+	// is one Office ships.
+	PPTXFont string `yaml:"pptx_font"`
+
 	Dir     string
 	CSS     string
 	chrome  *template.Template
@@ -171,3 +181,60 @@ func (t *Theme) AssetsDir() string { return filepath.Join(t.Dir, assetsDir) }
 
 // FontsDir is the theme's self-hosted font directory.
 func (t *Theme) FontsDir() string { return filepath.Join(t.Dir, fontsDir) }
+
+// PPTXFontDir is where a theme puts font files for a native .pptx to embed.
+//
+// Separate from `fonts/`, which holds the woff2 the HTML uses: PowerPoint
+// cannot read woff2, so embedding needs sfnt (.ttf/.otf) and a theme that
+// wants both ships both.
+const PPTXFontDir = "pptx/fonts"
+
+// EmbeddableFont is one sfnt file a theme offers for embedding.
+type EmbeddableFont struct {
+	// Variant is "regular", "bold", "italic" or "boldItalic", taken from the
+	// filename suffix after the last dash.
+	Variant string
+	Path    string
+}
+
+// PPTXFonts lists the sfnt files this theme offers for embedding, keyed by
+// variant.
+//
+// Names are read as `<anything>-<variant>.ttf`, so `Roboto-bold.ttf` is the
+// bold variant. A file whose suffix is not a known variant is ignored rather
+// than guessed at: embedding the wrong weight is worse than not embedding it.
+func (t *Theme) PPTXFonts() ([]EmbeddableFont, error) {
+	dir := filepath.Join(t.Dir, PPTXFontDir)
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("theme: read %s: %w", dir, err)
+	}
+
+	known := map[string]string{
+		"regular": "regular", "bold": "bold", "italic": "italic",
+		"bolditalic": "boldItalic", "boielditalic": "boldItalic",
+	}
+	var out []EmbeddableFont
+	for _, e := range entries {
+		name := e.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		if e.IsDir() || (ext != ".ttf" && ext != ".otf") {
+			continue
+		}
+		base := strings.TrimSuffix(name, filepath.Ext(name))
+		dash := strings.LastIndex(base, "-")
+		if dash < 0 {
+			continue
+		}
+		variant, ok := known[strings.ToLower(base[dash+1:])]
+		if !ok {
+			continue
+		}
+		out = append(out, EmbeddableFont{Variant: variant, Path: filepath.Join(dir, name)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Variant < out[j].Variant })
+	return out, nil
+}
