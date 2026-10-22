@@ -65,6 +65,7 @@ const (
 	RuleSlideSize          = "slide-size"
 	RuleMediaIntegrity     = "media-integrity"
 	RuleFontEmbedding      = "font-embedding"
+	RuleTextAutofit        = "text-autofit"
 )
 
 // Namespaces. Declared once; the attribute scan below compares against them.
@@ -166,6 +167,7 @@ func VerifyBytes(raw []byte) ([]Finding, error) {
 	findings = append(findings, checkThemePerMaster(parts, rels)...)
 	findings = append(findings, checkMedia(parts, bodies)...)
 	findings = append(findings, checkFonts(parts, bodies, rels)...)
+	findings = append(findings, checkTextAutofit(parts, bodies)...)
 
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Rule != findings[j].Rule {
@@ -976,4 +978,49 @@ func Fonts(path string) ([]FontReport, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Typeface < out[j].Typeface })
 	return out, nil
+}
+
+// reTxBody matches a text-bearing shape body on a slide.
+var reTxBody = regexp.MustCompile(`(?s)<p:txBody>(.*?)</p:txBody>`)
+
+// checkTextAutofit requires every text box that actually holds text to say
+// what happens when the text does not fit.
+//
+// A box here is sized from the element the browser laid out, but PowerPoint
+// re-breaks the lines inside it with its own metrics -- and with its own font
+// if the named face is absent. A title CSS fits on one line can take two.
+// Without an autofit rule the text simply draws outside the box and over
+// whatever is below it: the first native cover overflowed a 0.484in title box
+// by roughly 0.4in into a subtitle 0.21in beneath.
+//
+// So the invariant is not "the text fits" -- that cannot be known here -- but
+// "the package has told the reader what to do when it doesn't". A refactor
+// that drops the autofit would otherwise produce decks that look fine in
+// every check and overlap on someone's screen.
+func checkTextAutofit(names []string, bodies map[string][]byte) []Finding {
+	var out []Finding
+	for _, n := range names {
+		if !reSlidePart.MatchString(n) {
+			continue
+		}
+		for _, m := range reTxBody.FindAllStringSubmatch(string(bodies[n]), -1) {
+			body := m[1]
+			// Only bodies with actual text can overflow. An empty one belongs
+			// to a rectangle, which carries a txBody because the schema wants
+			// one.
+			if !strings.Contains(body, "<a:t>") {
+				continue
+			}
+			if strings.Contains(body, "<a:normAutofit") ||
+				strings.Contains(body, "<a:spAutoFit") ||
+				strings.Contains(body, "<a:noAutofit") {
+				continue
+			}
+			out = append(out, Finding{Rule: RuleTextAutofit, Part: n,
+				Detail: "a text box holding text declares no autofit, so text that does not fit " +
+					"will draw outside the box and over whatever is below it"})
+			break
+		}
+	}
+	return out
 }

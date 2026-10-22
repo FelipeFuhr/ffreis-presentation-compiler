@@ -806,3 +806,60 @@ func TestTableGridAlwaysTotalsItsFrame(t *testing.T) {
 		t.Errorf("grid columns total %d EMU, want exactly the frame's %d", sum, want)
 	}
 }
+
+func TestEveryNativeTextBoxDeclaresAnAutofit(t *testing.T) {
+	// The cover that prompted this overflowed its title box into the subtitle
+	// because nothing told PowerPoint what to do when the text did not fit.
+	dst := filepath.Join(t.TempDir(), "native.pptx")
+	if err := pptx.Write(dst, nativeDeck()); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	parts, _ := readAll(t, dst)
+	slide := parts["ppt/slides/slide1.xml"]
+	if !strings.Contains(slide, "<a:normAutofit/>") {
+		t.Error("native text boxes do not declare normAutofit")
+	}
+	findings, err := pptx.Verify(dst)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	for _, f := range findings {
+		t.Errorf("unexpected finding: %s", f)
+	}
+}
+
+func TestVerifyCatchesATextBoxWithNoAutofit(t *testing.T) {
+	parts := explode(t, mustBytes(t, nativeDeck()))
+	for i := range parts {
+		if parts[i].name == "ppt/slides/slide1.xml" {
+			parts[i].body = []byte(strings.ReplaceAll(string(parts[i].body),
+				"<a:normAutofit/>", ""))
+		}
+	}
+	findings := verifyBytes(t, rezip(t, parts))
+	if rules(findings)[pptx.RuleTextAutofit] == 0 {
+		t.Errorf("want a text-autofit finding, got %v", rules(findings))
+	}
+}
+
+func TestARectangleNeedsNoAutofit(t *testing.T) {
+	// A rectangle carries an empty txBody because the schema wants one; it can
+	// never overflow, and flagging it would be noise on every native slide.
+	dst := filepath.Join(t.TempDir(), "rect.pptx")
+	err := pptx.Write(dst, pptx.Deck{
+		WidthIn: 13.333, HeightIn: 7.5,
+		Slides: []pptx.Slide{{Shapes: []pptx.Shape{
+			{Kind: pptx.ShapeRect, At: pptx.Rect{WIn: 13.333, HIn: 7.5}, Fill: "FBF8F1"},
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	findings, err := pptx.Verify(dst)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	for _, f := range findings {
+		t.Errorf("a rectangle produced a finding: %s", f)
+	}
+}

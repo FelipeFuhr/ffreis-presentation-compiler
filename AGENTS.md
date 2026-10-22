@@ -320,6 +320,40 @@ its silence means nothing. Treat it as one lenient reader's opinion, not as
 proof the file opens. The reader whose opinion actually matters is the one
 below.
 
+## Text that draws outside its box (`scripts/pptx-overflow-check.py`)
+
+A native text box is sized from the element the browser laid out, but the
+reader re-breaks the lines inside it with its own metrics — and with its own
+font if the named face is absent. **A cover title that CSS fits on one line
+took two, grew past its box and drew on top of the subtitle beneath it, by
+25.8 points.**
+
+Nothing upstream could have caught that. `verify.go` checks the package, not
+the rendering; `check` measures the DOM, which is the layout that was
+*correct*. The only way to see it is to render the `.pptx` and look at where
+the glyphs landed.
+
+- **The fix is `<a:normAutofit/>` on every text body**, which tells the reader
+  to shrink the text until it fits rather than let it escape. `spAutoFit`
+  would be the wrong one: it grows the box, moving everything after it.
+  Trading a little type size for containment is the right way round — smaller
+  text reads as a choice, overlapping text reads as broken.
+- **`text-autofit` in `verify.go` locks it.** The invariant is not "the text
+  fits", which cannot be known at write time, but "the package has told the
+  reader what to do when it doesn't". A refactor dropping the autofit would
+  otherwise produce decks that pass every check and overlap on someone's
+  screen.
+- **`make pptx-overflow-check PPTX=<file>`** is the empirical half: convert
+  with LibreOffice, read the word boxes out of the PDF, compare the vertical
+  extents of consecutive lines. Proven against the real defect — it reports
+  the 25.8pt overlap on the pre-fix build and passes the fixed one.
+  Tolerance is 1pt, because PDF word boxes include ascent and descent and
+  adjacent lines routinely share a fraction of a point.
+
+It finds *a* reader's overlap, not *the* reader's: LibreOffice's wrapping is
+its own. That is still far more than guessing, and it caught by measurement
+the same defect a human caught by eye.
+
 ## Typefaces
 
 **OOXML names exactly one typeface per run and has no fallback stack.** The CSS

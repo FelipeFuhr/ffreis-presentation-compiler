@@ -44,7 +44,8 @@ MUTATION_THRESHOLD ?= 60
 	validate-deck validate-selftest \
 	seo-selftest seo-audit \
 	golden golden-update review metrics \
-	pptx-acceptance acceptance-test acceptance-selftest ooxml-validate
+	pptx-acceptance acceptance-test acceptance-selftest ooxml-validate \
+	pptx-overflow-check
 
 ## mutation: run mutation testing with gremlins (slow — CI only)
 mutation:
@@ -464,6 +465,10 @@ ooxml-validate: ## Validate a pptx with Microsoft's Open XML SDK: make ooxml-val
 	}
 	@$(DOTNET) build -c Release -v q --nologo "$(OOXML_DIR)" >/dev/null
 	@"$(OOXML_BIN)" "$(PPTX)"
+
+pptx-overflow-check: ## Render a pptx and fail if any text draws over other text: make pptx-overflow-check PPTX=<file>
+	@[ -n "$(PPTX)" ] || { echo "usage: make pptx-overflow-check PPTX=<file.pptx>" >&2; exit 2; }
+	@python3 ./scripts/pptx-overflow-check.py "$(PPTX)"
 
 acceptance-selftest: ## Prove the acceptance orchestrator works, without Windows
 	@./$(ACCEPTANCE_DIR)/selftest.sh

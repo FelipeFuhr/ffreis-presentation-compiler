@@ -186,9 +186,26 @@ func para(text string, s TextStyle, lang, extraPr string) string {
 		paraProps(s, extraPr), runProps(s, lang), escape(text))
 }
 
-// bodyPr insets are zeroed: the theme's spec already says where the box goes,
-// and PowerPoint's default 0.1in padding would shift every shape.
-const bodyPrNoInset = `<a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t"/><a:lstStyle/>`
+// bodyPrText is the body properties every text box and list gets.
+//
+// Insets are zeroed because the spec already says where the box goes, and
+// PowerPoint's default 0.1in padding would shift every shape.
+//
+// **normAutofit is the load-bearing part.** A box is sized from the element
+// the browser laid out, but PowerPoint re-breaks the lines inside it with its
+// own metrics -- and with its own font, if the named face is absent. A title
+// that CSS fits on one line can take two, and without an autofit rule the
+// text simply draws outside its box and over whatever sits below: the first
+// cover built this way overflowed its 0.484in title box by about 0.4in into a
+// subtitle 0.21in beneath it.
+//
+// normAutofit tells PowerPoint to shrink the text until it fits instead. That
+// trades a little type size for containment, which is the right way round:
+// slightly smaller text reads as a choice, overlapping text reads as broken.
+// spAutoFit would be the wrong one -- it grows the box, which moves everything
+// after it and makes the collision worse.
+const bodyPrText = `<a:bodyPr wrap="square" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t">` +
+	`<a:normAutofit/></a:bodyPr><a:lstStyle/>`
 
 func textBoxXML(id int, sh Shape, lang string) string {
 	var paras strings.Builder
@@ -200,7 +217,7 @@ func textBoxXML(id int, sh Shape, lang string) string {
         <p:nvSpPr><p:cNvPr id="%d" name="%s"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
         <p:spPr>%s<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>%s</p:spPr>
         <p:txBody>%s%s</p:txBody>
-      </p:sp>`, id, escape(shapeName(sh, "Text")), xfrm(sh.At), fillOrNone(sh.Fill), bodyPrNoInset, paras.String())
+      </p:sp>`, id, escape(shapeName(sh, "Text")), xfrm(sh.At), fillOrNone(sh.Fill), bodyPrText, paras.String())
 }
 
 func bulletsXML(id int, sh Shape, lang string) string {
@@ -229,7 +246,7 @@ func bulletsXML(id int, sh Shape, lang string) string {
         <p:nvSpPr><p:cNvPr id="%d" name="%s"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr>
         <p:spPr>%s<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>
         <p:txBody>%s%s</p:txBody>
-      </p:sp>`, id, escape(shapeName(sh, "List")), xfrm(sh.At), bodyPrNoInset, paras.String())
+      </p:sp>`, id, escape(shapeName(sh, "List")), xfrm(sh.At), bodyPrText, paras.String())
 }
 
 func rectXML(id int, sh Shape) string {
