@@ -234,3 +234,126 @@ func TestTokensOnTooHandlesTypicalShapes(t *testing.T) {
 		t.Error("a selector-scoped property was treated as a token")
 	}
 }
+
+// ── PPTXFonts ───────────────────────────────────────────────────────────────
+
+// writeFontTheme builds a theme whose pptx/fonts directory holds the given
+// filenames, and returns the loaded theme.
+//
+// Contents are irrelevant: PPTXFonts classifies by filename and never opens
+// the files, which is why embedding a wrong-weight face is a naming bug
+// rather than a parsing one.
+func writeFontTheme(t *testing.T, names ...string) *theme.Theme {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "fonted", theme.PPTXFontDir)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("mkdir fonts: %v", err)
+	}
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("not an sfnt"), 0o600); err != nil {
+			t.Fatalf("write %s: %v", n, err)
+		}
+	}
+	// Load insists on a manifest, a stylesheet, the chrome template and at
+	// least one layout, so the fixture supplies the minimum of each.
+	for rel, body := range map[string]string{
+		"theme.yaml":           "name: fonted\nfonts:\n  - Roboto\n",
+		"css/10-tokens.css":    ":root{--x:1px}",
+		"slide.gohtml":         "{{ .Body }}",
+		"layouts/cover.gohtml": "{{ .Title }}",
+	} {
+		path := filepath.Join(root, "fonted", rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	th, err := theme.Load(root, "fonted")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	return th
+}
+
+func variants(fonts []theme.EmbeddableFont) []string {
+	out := make([]string, 0, len(fonts))
+	for _, f := range fonts {
+		out = append(out, f.Variant)
+	}
+	return out
+}
+
+func TestPPTXFontsReadsTheVariantFromTheFilenameSuffix(t *testing.T) {
+	th := writeFontTheme(t,
+		"Roboto-regular.ttf", "Roboto-bold.ttf", "Roboto-italic.otf", "Roboto-bolditalic.ttf")
+	got, err := th.PPTXFonts()
+	if err != nil {
+		t.Fatalf("PPTXFonts: %v", err)
+	}
+	// Sorted by variant, so the order is stable for a caller building
+	// embeddedFontLst entries.
+	want := []string{"bold", "boldItalic", "italic", "regular"}
+	if diff := strings.Join(variants(got), ","); diff != strings.Join(want, ",") {
+		t.Errorf("variants = %s, want %s", diff, strings.Join(want, ","))
+	}
+	for _, f := range got {
+		if filepath.Base(filepath.Dir(f.Path)) != "fonts" {
+			t.Errorf("%s: path does not point into the theme's font dir: %s", f.Variant, f.Path)
+		}
+	}
+}
+
+func TestPPTXFontsIgnoresAnUnrecognisedSuffix(t *testing.T) {
+	// Embedding the wrong weight is worse than not embedding, so an
+	// unparsable suffix is skipped rather than guessed at. "semibold" is the
+	// realistic case: a real face this model has no slot for.
+	th := writeFontTheme(t, "Roboto-semibold.ttf", "Roboto-300.ttf", "Roboto-bold.ttf")
+	got, err := th.PPTXFonts()
+	if err != nil {
+		t.Fatalf("PPTXFonts: %v", err)
+	}
+	if len(got) != 1 || got[0].Variant != "bold" {
+		t.Errorf("variants = %v, want just bold", variants(got))
+	}
+}
+
+func TestPPTXFontsIgnoresFilesWithNoVariantAtAll(t *testing.T) {
+	th := writeFontTheme(t, "Roboto.ttf", "Roboto-bold.ttf")
+	got, err := th.PPTXFonts()
+	if err != nil {
+		t.Fatalf("PPTXFonts: %v", err)
+	}
+	if len(got) != 1 || got[0].Variant != "bold" {
+		t.Errorf("variants = %v, want just bold", variants(got))
+	}
+}
+
+func TestPPTXFontsIgnoresNonFontFiles(t *testing.T) {
+	th := writeFontTheme(t, "Roboto-bold.ttf", "notes-regular.txt", "licence-regular.md")
+	got, err := th.PPTXFonts()
+	if err != nil {
+		t.Fatalf("PPTXFonts: %v", err)
+	}
+	if len(got) != 1 || got[0].Variant != "bold" {
+		t.Errorf("variants = %v, want just bold", variants(got))
+	}
+}
+
+func TestPPTXFontsIsEmptyWhenTheThemeOffersNone(t *testing.T) {
+	// A theme with no pptx/fonts directory is the common case, not an error:
+	// embedding is opt-in and most themes rely on installed faces.
+	th, err := theme.Load(examplesRoot, "sample")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got, err := th.PPTXFonts()
+	if err != nil {
+		t.Fatalf("a theme without a font directory must not be an error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %v, want none", variants(got))
+	}
+}

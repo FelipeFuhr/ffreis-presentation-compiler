@@ -214,8 +214,10 @@ func (t *Theme) PPTXFonts() ([]EmbeddableFont, error) {
 	}
 
 	known := map[string]string{
-		"regular": "regular", "bold": "bold", "italic": "italic",
-		"bolditalic": "boldItalic", "boielditalic": "boldItalic",
+		"regular":    "regular",
+		"bold":       "bold",
+		"italic":     "italic",
+		"bolditalic": "boldItalic",
 	}
 	var out []EmbeddableFont
 	for _, e := range entries {
