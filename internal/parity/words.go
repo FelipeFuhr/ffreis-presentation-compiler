@@ -80,6 +80,29 @@ func significantWords(normalized string) map[string]bool {
 // Notes are deliberately excluded, a path and speaker notes respectively,
 // neither painted on the slide itself), its rendered body prose, and every
 // string value in its layout fields other than nonVisualFieldKeys.
+// Fold lowercases and strips diacritics without splitting into words, for a
+// consumer that needs to compare against text whose word boundaries are not
+// trustworthy.
+//
+// Exported alongside Words for internal/pptxcheck: letter-spaced type extracts
+// from a PDF with the gaps between glyphs read as word breaks, so a kicker set
+// in tracked capitals arrives as "PROPO STA DE PROJ E TO". Matching whole
+// words against that reports every tracked heading as missing.
+func Fold(text string) string { return normalize(text) }
+
+// Words folds arbitrary text into the same comparable word set ExpectedWords
+// produces, so a second consumer can compare against a slide's expectation
+// without reimplementing the folding.
+//
+// Exported for internal/pptxcheck, which compares a slide's declared words
+// against text extracted from a rendered .pptx. That comparison has to fold
+// both sides identically or it reports differences that are only in the
+// normalisation -- and the diacritic table here is hand-rolled, so a second
+// copy of it would drift.
+func Words(text string) map[string]bool {
+	return significantWords(normalize(text))
+}
+
 func ExpectedWords(s deck.Slide) map[string]bool {
 	words := map[string]bool{}
 	add := func(text string) {

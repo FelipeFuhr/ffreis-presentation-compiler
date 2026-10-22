@@ -7,7 +7,10 @@ package deck
 
 import (
 	"fmt"
+	stdhtml "html"
 	"html/template"
+	"regexp"
+	"strings"
 
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/seo"
 )
@@ -124,4 +127,42 @@ func (s *Slide) Field(name string) string {
 		return ""
 	}
 	return str
+}
+
+// blockEnd closes an element whose end is a line break in plain text.
+var blockEnd = regexp.MustCompile(`(?i)</(p|li|h[1-6]|div|blockquote|tr)>|<br\s*/?>`)
+
+// anyTag matches a remaining markup tag.
+var anyTag = regexp.MustCompile(`<[^>]*>`)
+
+// BodyText is the slide's Markdown body as plain text, paragraphs preserved.
+//
+// Body reaches templates as rendered HTML, which is right for the HTML and PDF
+// exports and useless to anything that needs characters. A native .pptx text
+// box needs characters, and before this existed the body simply did not travel
+// to one: six slides in the first consumer deck silently lost their framing
+// prose, which a measured check over the rendered file found and nothing else
+// could have.
+//
+// Block ends become newlines before tags are stripped, so a two-paragraph body
+// stays two paragraphs instead of running together into one line.
+func (s Slide) BodyText() string {
+	// A sentinel rather than a newline, because the source's own newlines are
+	// still in the markup at this point: Markdown soft-wraps a paragraph
+	// across lines, and treating those as breaks turned one paragraph into
+	// several. Only a block end is a break; every other run of whitespace,
+	// newlines included, is a space.
+	const br = "\x00"
+
+	html := blockEnd.ReplaceAllString(string(s.Body), br)
+	html = anyTag.ReplaceAllString(html, "")
+	text := stdhtml.UnescapeString(html)
+
+	var paragraphs []string
+	for _, p := range strings.Split(text, br) {
+		if collapsed := strings.Join(strings.Fields(p), " "); collapsed != "" {
+			paragraphs = append(paragraphs, collapsed)
+		}
+	}
+	return strings.Join(paragraphs, "\n")
 }

@@ -104,6 +104,11 @@ func Selectors(specs map[string]Spec) []string {
 			if sh.Measure != "" {
 				seen[sh.Measure] = true
 			}
+			// A grow target has to be measured too, or the shape silently
+			// keeps its own height and the growth is a no-op.
+			if sh.GrowTo != "" {
+				seen[sh.GrowTo] = true
+			}
 		}
 	}
 	return sortedKeys(seen)

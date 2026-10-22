@@ -320,39 +320,73 @@ its silence means nothing. Treat it as one lenient reader's opinion, not as
 proof the file opens. The reader whose opinion actually matters is the one
 below.
 
-## Text that draws outside its box (`scripts/pptx-overflow-check.py`)
+## Measured checks on the exported file (`internal/pptxcheck`)
 
-A native text box is sized from the element the browser laid out, but the
-reader re-breaks the lines inside it with its own metrics — and with its own
-font if the named face is absent. **A cover title that CSS fits on one line
-took two, grew past its box and drew on top of the subtitle beneath it, by
-25.8 points.**
+**This is a correction of method, and the correction matters more than the
+rules.** A native cover shipped with its title drawing 25.8 points on top of
+the subtitle, and everything passed:
 
-Nothing upstream could have caught that. `verify.go` checks the package, not
-the rendering; `check` measures the DOM, which is the layout that was
-*correct*. The only way to see it is to render the `.pptx` and look at where
-the glyphs landed.
+- `check` measures the rendered DOM. The DOM was **correct** — the overlap
+  appeared when a *reader* re-broke the lines inside a box sized from it.
+- `verify` measures the package. The package was conformant; a text box that
+  overflows is perfectly well-formed OOXML.
+- The side-by-side comparison scored that slide at **3.0% different, better
+  than twenty others**, because a pixel-difference percentage is a
+  *similarity* score and 25.8pt of collision is a rounding error against
+  921,600 pixels.
 
-- **The fix is `<a:normAutofit/>` on every text body**, which tells the reader
-  to shrink the text until it fits rather than let it escape. `spAutoFit`
-  would be the wrong one: it grows the box, moving everything after it.
-  Trading a little type size for containment is the right way round — smaller
-  text reads as a choice, overlapping text reads as broken.
-- **`text-autofit` in `verify.go` locks it.** The invariant is not "the text
-  fits", which cannot be known at write time, but "the package has told the
-  reader what to do when it doesn't". A refactor dropping the autofit would
-  otherwise produce decks that pass every check and overlap on someone's
-  screen.
-- **`make pptx-overflow-check PPTX=<file>`** is the empirical half: convert
-  with LibreOffice, read the word boxes out of the PDF, compare the vertical
-  extents of consecutive lines. Proven against the real defect — it reports
-  the 25.8pt overlap on the pre-fix build and passes the fixed one.
-  Tolerance is 1pt, because PDF word boxes include ascent and descent and
-  adjacent lines routinely share a fraction of a point.
+The mistake was asking "does it look like the reference?" and treating the
+answer as "is it broken?". Only the first had ever been asked of a `.pptx`.
 
-It finds *a* reader's overlap, not *the* reader's: LibreOffice's wrapping is
-its own. That is still far more than guessing, and it caught by measurement
-the same defect a human caught by eye.
+`pptx-check` asks the second, the way `check` asks it of the DOM: render the
+artifact, measure where the glyphs landed, report invariants that hold
+whatever the reference looks like. Five rules — `pptx-overlap`,
+`pptx-out-of-bounds`, `pptx-tiny-type`, `pptx-missing-text`,
+`pptx-slide-count` — with `TestEachRuleFires` as the selftest.
+
+```bash
+go run ./cmd/ffreis-presentation-compiler pptx-check \
+  -pptx dist/deck.pptx -deck-root decks/<name>
+```
+
+- **`pptx-missing-text` is the one that earns its place.** It is `parity`'s
+  question with the guesswork removed: a native slide carries real text, so
+  the comparison is exact rather than OCR-tolerant. Run on the first native
+  build it found **six slides silently missing their Markdown body prose** —
+  the specs mapped `.deck-table` and `.table-source` but never `.table-note`.
+  Nothing else could have noticed.
+- **Image-mode slides are exempt from it**, and say so: a flat picture has no
+  extractable text, so every word would read as missing on exactly the slides
+  the rule cannot judge.
+- **Two false positives were designed out rather than tolerated.** Letter-
+  spaced type extracts with the glyph gaps read as word breaks, so a tracked
+  kicker arrives as `PROPO STA DE PROJ E TO`; each line is therefore also
+  matched as one collapsed run of letters. And adjacent lines may share a
+  point, because PDF word boxes include ascent and descent.
+- **It finds *a* reader's defects, not PowerPoint's.** LibreOffice's wrapping
+  is its own. That is still the difference between measuring and guessing.
+
+### The three fixes it drove, in order
+
+Each was surfaced by the previous measurement, which is the point:
+
+1. **`<a:normAutofit/>` on every text body.** Nothing told the reader what to
+   do when text did not fit, so it drew outside the box. `spAutoFit` would be
+   wrong — it grows the box and moves everything after it. Locked by
+   `text-autofit` in `verify.go`, whose invariant is not "the text fits" (not
+   knowable at write time) but "the package said what to do when it doesn't".
+2. **`slide.body`**, exposing `deck.Slide.BodyText()` — the body as characters
+   rather than rendered HTML — so the prose those six slides were losing can
+   be mapped. Only block ends break: a Markdown soft-wrap inside a paragraph
+   is a space, and treating it as a break split one paragraph into several.
+3. **`grow_to`** on a shape spec. Mapping the prose made `normAutofit` shrink
+   it to **6pt** on three slides, which `pptx-tiny-type` caught immediately —
+   the two rules have to travel together. `grow_to: .slide-body` claims the
+   space the layout already reserves beneath the prose, so a reader needing an
+   extra line pays in height rather than in type size. Bounded by
+   construction: the box can only reach the named element's bottom.
+
+The deck went 9 findings → 6 → 3 → **0 across 34 slides**.
 
 ## Typefaces
 

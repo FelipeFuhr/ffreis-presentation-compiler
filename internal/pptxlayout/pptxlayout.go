@@ -75,6 +75,19 @@ type ShapeSpec struct {
 	// is how a template's `{{ with get .Fields "logo" }}` is expressed here.
 	When string `yaml:"when"`
 
+	// GrowTo is a CSS selector whose bottom this shape's box extends down to,
+	// when that is lower than its own.
+	//
+	// A measured box fits the text the way CSS broke it. A reader re-breaks it
+	// and may need another line or two, and with normAutofit the shortfall is
+	// paid in type size -- newly mapped body prose came out at 6pt, below any
+	// legibility floor. Where the layout has already reserved space beneath an
+	// element, claiming it lets the text stay readable instead.
+	//
+	// Bounded by construction: the box can only reach the named element's
+	// bottom, so it cannot grow into whatever sits below that.
+	GrowTo string `yaml:"grow_to"`
+
 	// Measure is a CSS selector naming the element that renders this shape in
 	// the HTML. When set, the shape's rectangle and formatting come from the
 	// browser's own layout of that element, and `at` is not needed.
@@ -203,6 +216,7 @@ func Colour(tokens map[string]string, value string) string {
 // they can never collide with a layout field a theme invents.
 const (
 	IntrinsicSlideNumber = "slide.number"
+	IntrinsicSlideBody   = "slide.body"
 	IntrinsicDeckTitle   = "deck.title"
 	IntrinsicDeckSub     = "deck.subtitle"
 	IntrinsicDeckClient  = "deck.client"
@@ -215,6 +229,12 @@ func resolve(key string, s deck.Slide, d *deck.Deck) (any, bool) {
 	switch key {
 	case IntrinsicSlideNumber:
 		return s.Number, s.Number > 0
+	case IntrinsicSlideBody:
+		// The Markdown body as characters rather than rendered HTML. Without
+		// this a layout's framing prose never reached a native slide, and six
+		// slides in the first consumer deck lost theirs silently.
+		text := s.BodyText()
+		return text, strings.TrimSpace(text) != ""
 	case IntrinsicDeckTitle:
 		return deckField(d, func(d *deck.Deck) string { return d.Title })
 	case IntrinsicDeckSub:
@@ -448,6 +468,14 @@ func one(sp ShapeSpec, s deck.Slide, opt Options) (pptx.Shape, bool, error) {
 			return base, false, fmt.Errorf("measurement for %q reports no frame width", sp.Measure)
 		}
 		base.At = el.rect(scale)
+		if sp.GrowTo != "" {
+			if into, found := opt.Measured.Elements[sp.GrowTo]; found {
+				bottom := into.rect(scale)
+				if h := bottom.YIn + bottom.HIn - base.At.YIn; h > base.At.HIn {
+					base.At.HIn = h
+				}
+			}
+		}
 		base.Style = specStyle(override(sp.Style, measuredStyle(el)), opt.Tokens)
 		grid = el.Grid
 		measured = true

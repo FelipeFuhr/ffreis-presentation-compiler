@@ -45,7 +45,7 @@ MUTATION_THRESHOLD ?= 60
 	seo-selftest seo-audit \
 	golden golden-update review metrics \
 	pptx-acceptance acceptance-test acceptance-selftest ooxml-validate \
-	pptx-overflow-check
+	pptx-check
 
 ## mutation: run mutation testing with gremlins (slow — CI only)
 mutation:
@@ -466,9 +466,18 @@ ooxml-validate: ## Validate a pptx with Microsoft's Open XML SDK: make ooxml-val
 	@$(DOTNET) build -c Release -v q --nologo "$(OOXML_DIR)" >/dev/null
 	@"$(OOXML_BIN)" "$(PPTX)"
 
-pptx-overflow-check: ## Render a pptx and fail if any text draws over other text: make pptx-overflow-check PPTX=<file>
-	@[ -n "$(PPTX)" ] || { echo "usage: make pptx-overflow-check PPTX=<file.pptx>" >&2; exit 2; }
-	@python3 ./scripts/pptx-overflow-check.py "$(PPTX)"
+pptx-check: ## Render a pptx and measure it: make pptx-check PPTX=<file> [DECK=<name>]
+	@[ -n "$(PPTX)" ] || { echo "usage: make pptx-check PPTX=<file.pptx> [DECK=<name>]" >&2; exit 2; }
+	@command -v soffice >/dev/null 2>&1 || { \
+		echo "pptx-check: soffice is not installed -- this target FAILS rather than" >&2; \
+		echo "  skipping, because a skip that reads as a pass is how a gate stops gating." >&2; \
+		exit 1; \
+	}
+	@command -v pdftotext >/dev/null 2>&1 || { \
+		echo "pptx-check: pdftotext is not installed (poppler-utils)" >&2; exit 1; \
+	}
+	@go run ./cmd/$(BINARY) pptx-check -pptx "$(PPTX)" \
+		$(if $(DECK),-deck-root "$(abspath decks/$(DECK))",$(if $(wildcard $(EXAMPLE_DECK)),-deck-root "$(EXAMPLE_DECK)",))
 
 acceptance-selftest: ## Prove the acceptance orchestrator works, without Windows
 	@./$(ACCEPTANCE_DIR)/selftest.sh
