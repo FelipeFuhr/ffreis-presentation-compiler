@@ -125,6 +125,26 @@ func writeParts(z *zip.Writer, d Deck) error {
 	static := []struct{ name, src string }{
 		{"_rels/.rels", "assets/root.rels.xml"},
 		{"ppt/theme/theme1.xml", "assets/theme1.xml"},
+		// The notes master gets its OWN theme part, from the same asset bytes.
+		//
+		// ECMA-376 allocates a theme "per Handout Master, Notes Master, Slide
+		// Master or Presentation part", and PowerPoint enforces it for the notes
+		// master: pointing both masters at theme1.xml opens in python-pptx and
+		// LibreOffice without complaint and makes a desktop PowerPoint refuse the
+		// whole document with a generic "problem with the content" repair prompt.
+		// Repairing such a file is what revealed it -- PowerPoint wrote out a new
+		// theme2.xml and repointed the notes master at it, the only change it made
+		// to the package graph rather than to optional elements.
+		//
+		// Sharing is not banned in general: PowerPoint's own output has the
+		// presentation part and the slide master both on theme1, which is why
+		// presentation.xml.rels below still targets it. It is the notes master
+		// that needs its own.
+		//
+		// Same bytes rather than a second 7 KB asset: the requirement is a
+		// distinct part, not distinct content, and two near-identical assets
+		// would only drift.
+		{"ppt/theme/theme2.xml", "assets/theme1.xml"},
 		{"ppt/slideMasters/slideMaster1.xml", "assets/slideMaster1.xml"},
 		{"ppt/slideMasters/_rels/slideMaster1.xml.rels", "assets/slideMaster1.xml.rels"},
 		{"ppt/slideLayouts/slideLayout1.xml", "assets/slideLayout1.xml"},
@@ -282,6 +302,7 @@ func contentTypes(slides int) string {
   <Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>
   <Override PartName="/ppt/notesMasters/notesMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml"/>
   <Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+  <Override PartName="/ppt/theme/theme2.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
   <Override PartName="/ppt/presProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presProps+xml"/>
   <Override PartName="/ppt/viewProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.viewProps+xml"/>
   <Override PartName="/ppt/tableStyles.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml"/>

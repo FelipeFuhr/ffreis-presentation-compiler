@@ -199,6 +199,30 @@ So before adding any field here, ask what `CreateHeader` would have derived
 from it. The constants (`zipEpoch`, `zipModDate`, `zipModTime`, `zipVersion`)
 exist to make that derivation explicit rather than implied.
 
+**A notes master may not share the slide master's theme part.** ECMA-376
+allocates a theme "per Handout Master, Notes Master, Slide Master or
+Presentation part", and PowerPoint enforces it for the notes master. This
+package pointed both masters at `ppt/theme/theme1.xml`; python-pptx and
+LibreOffice opened it without complaint and a desktop PowerPoint refused the
+whole document with the same generic repair prompt as the zip bugs above. The
+fix is a second theme part, `theme2.xml`, from the same asset bytes --
+the requirement is a distinct *part*, not distinct content.
+
+**Sharing is not banned in general, which is the part that misleads.**
+PowerPoint's own output has the presentation part *and* the slide master both
+on `theme1`, so a rule of "one theme per part" would be wrong; it is the notes
+master specifically. `TestEachMasterHasItsOwnThemePart` encodes exactly that.
+
+**How it was found is the transferable bit: read what PowerPoint's repair
+changed.** Open the broken file in PowerPoint, let it repair, save, and diff
+the result against the input. A repair re-serialises *every* part, so most of
+the diff is noise -- what matters is any change to the **package graph**:
+a part added, removed, or re-targeted. Here the only such change in 152
+rewritten parts was a new `theme2.xml` with the notes master repointed at it.
+Corroborate against other producers before acting: every non-compiler `.pptx`
+to hand was 1 theme per master (1:1, 2:2, 3:3), and every file this compiler
+had ever written was 1 theme for 2 masters.
+
 **The version-field bug is the one worth internalising, because every tool to
 hand called the file valid.** `zipfile.testzip()`, `unzip -t`, python-pptx,
 LibreOffice and current PowerPoint all ignore the declared version — it is

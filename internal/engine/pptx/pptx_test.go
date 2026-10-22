@@ -223,6 +223,73 @@ func TestHeadersDeclareARealZipVersion(t *testing.T) {
 	}
 }
 
+// themeTarget returns the Target of the single theme relationship in a .rels
+// body, or "" if there is none.
+func themeTarget(t *testing.T, rels string) string {
+	t.Helper()
+	const typeAttr = `Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme"`
+	i := strings.Index(rels, typeAttr)
+	if i < 0 {
+		return ""
+	}
+	rest := rels[i:]
+	j := strings.Index(rest, `Target="`)
+	if j < 0 {
+		t.Fatalf("theme relationship has no Target: %s", rels)
+	}
+	rest = rest[j+len(`Target="`):]
+	k := strings.Index(rest, `"`)
+	if k < 0 {
+		t.Fatalf("unterminated Target: %s", rels)
+	}
+	return rest[:k]
+}
+
+// A notes master may not share the slide master's theme part.
+//
+// ECMA-376: "A PresentationML package shall contain zero or one Theme part per
+// Handout Master, Notes Master, Slide Master or Presentation part" -- a theme
+// is allocated per master, and PowerPoint enforces it. A package pointing both
+// masters at ppt/theme/theme1.xml opens in python-pptx and LibreOffice without
+// complaint, and a desktop PowerPoint refuses the whole document with a
+// generic "problem with the content / repair?" prompt. Repairing it is what
+// gave this away: PowerPoint wrote out a NEW ppt/theme/theme2.xml and
+// repointed the notes master at it, which is a change to the package graph
+// rather than the normalisation of optional elements it did everywhere else.
+//
+// Note what is NOT required: the presentation part and the slide master do
+// share theme1 in PowerPoint's own output, so this is about the notes master
+// specifically, not about sharing in general.
+func TestEachMasterHasItsOwnThemePart(t *testing.T) {
+	parts, _ := readAll(t, writeDeck(t, pptx.Slide{PNG: onePixelPNG}))
+
+	slideTheme := themeTarget(t, parts["ppt/slideMasters/_rels/slideMaster1.xml.rels"])
+	notesTheme := themeTarget(t, parts["ppt/notesMasters/_rels/notesMaster1.xml.rels"])
+
+	if slideTheme == "" {
+		t.Fatal("the slide master declares no theme relationship")
+	}
+	if notesTheme == "" {
+		t.Fatal("the notes master declares no theme relationship")
+	}
+	if slideTheme == notesTheme {
+		t.Errorf("slide master and notes master share the theme part %q; the notes master needs its own", notesTheme)
+	}
+
+	// Every theme the masters point at must exist, and must be typed.
+	for who, target := range map[string]string{"slide master": slideTheme, "notes master": notesTheme} {
+		name := "ppt/theme/" + strings.TrimPrefix(target, "../theme/")
+		if _, ok := parts[name]; !ok {
+			t.Errorf("%s points at %s, which the package does not contain", who, name)
+			continue
+		}
+		override := `<Override PartName="/` + name + `" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>`
+		if !strings.Contains(parts["[Content_Types].xml"], override) {
+			t.Errorf("%s: %s has no theme content-type Override", who, name)
+		}
+	}
+}
+
 func TestWriteIsReproducible(t *testing.T) {
 	slides := []pptx.Slide{{PNG: onePixelPNG, Notes: "same"}}
 	first, err := os.ReadFile(writeDeck(t, slides...))
