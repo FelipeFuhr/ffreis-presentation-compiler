@@ -10,10 +10,16 @@ import (
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine/pptx"
 )
 
-// sfnt is enough of a TrueType header to be distinguishable font data. The
-// embedding path does not parse the font, so a valid header is sufficient and
-// shipping a real typeface in the test fixtures would not test anything more.
-var sfnt = append([]byte{0x00, 0x01, 0x00, 0x00}, []byte("probe font data")...)
+// probeSfnt is the fixture every embedding test hands in.
+//
+// It has to be a real font: the embedding path reads the OS/2, head and name
+// tables to build the EOT header a reader matches against. The fifteen bytes
+// of "probe font data" this replaced were embedded happily by the old writer,
+// because nothing read them. See buildSfnt in eot_test.go for why the font is
+// synthesised rather than shipped.
+func probeSfnt(t *testing.T) []byte {
+	return buildSfnt(t, fontSpec{Family: "ZZProbeFace", Style: "Regular", Weight: 400, OS2Version: 1})
+}
 
 func fontDeck(fonts ...pptx.EmbeddedFont) pptx.Deck {
 	return pptx.Deck{
@@ -87,14 +93,24 @@ func TestAssumedPresentIsCaseAndSpaceInsensitive(t *testing.T) {
 // ── embedding ───────────────────────────────────────────────────────────────
 
 func TestEmbeddingWiresThePartTheRelationshipAndTheDeclaration(t *testing.T) {
+	font := probeSfnt(t)
 	_, parts := writeDeckTo(t, fontDeck(pptx.EmbeddedFont{
-		Typeface: "ZZProbeFace", Regular: sfnt, Bold: sfnt,
+		Typeface: "ZZProbeFace", Regular: font, Bold: font,
 	}))
 
-	// The data parts exist and carry the bytes.
+	// The data parts exist and carry the font inside an EOT container.
+	//
+	// This used to assert the part was byte-identical to the sfnt handed in,
+	// which passed for as long as the writer shipped the .ttf with no header
+	// -- the defect. What matters is that the font is in there AND that a
+	// reader has a header to recognise it by.
 	for _, name := range []string{"ppt/fonts/font1-regular.fntdata", "ppt/fonts/font1-bold.fntdata"} {
-		if got := parts[name]; got != string(sfnt) {
-			t.Errorf("%s holds %d bytes, want the font data", name, len(got))
+		got := parts[name]
+		if !strings.Contains(got, string(font)) {
+			t.Errorf("%s does not carry the font data", name)
+		}
+		if len(got) <= len(font) {
+			t.Errorf("%s is %d bytes for a %d-byte font, so it has no header", name, len(got), len(font))
 		}
 	}
 	// Typed, or PowerPoint cannot interpret them.
@@ -140,7 +156,7 @@ func TestAnEmbeddedFontWithNoDataIsNotDeclared(t *testing.T) {
 
 func TestEmbeddedFontsSurviveVerification(t *testing.T) {
 	dst, _ := writeDeckTo(t, fontDeck(pptx.EmbeddedFont{
-		Typeface: "ZZProbeFace", Regular: sfnt, Italic: sfnt,
+		Typeface: "ZZProbeFace", Regular: probeSfnt(t), Italic: probeSfnt(t),
 	}))
 	findings, err := pptx.Verify(dst)
 	if err != nil {
@@ -155,7 +171,9 @@ func TestVerifyCatchesFontDataNothingDeclares(t *testing.T) {
 	// Orphan font data usually means a declaration was dropped rather than
 	// the bytes, and it travels in every copy of the file.
 	parts := explode(t, mustBytes(t, fontDeck()))
-	parts = append(parts, namedPart{"ppt/fonts/font9-regular.fntdata", sfnt})
+	// Content irrelevant: the rule is about a part nothing declares, which is
+	// decided by the manifest and not by whether the bytes are a real font.
+	parts = append(parts, namedPart{"ppt/fonts/font9-regular.fntdata", []byte("orphaned")})
 	findings := verifyBytes(t, rezip(t, parts))
 	if rules(findings)[pptx.RuleFontEmbedding] == 0 {
 		t.Errorf("want a font-embedding finding, got %v", rules(findings))
@@ -163,7 +181,7 @@ func TestVerifyCatchesFontDataNothingDeclares(t *testing.T) {
 }
 
 func TestVerifyCatchesADeclarationWithNoData(t *testing.T) {
-	raw := mustBytes(t, fontDeck(pptx.EmbeddedFont{Typeface: "ZZProbeFace", Regular: sfnt}))
+	raw := mustBytes(t, fontDeck(pptx.EmbeddedFont{Typeface: "ZZProbeFace", Regular: probeSfnt(t)}))
 	parts := explode(t, raw)
 	kept := parts[:0]
 	for _, p := range parts {
@@ -181,7 +199,7 @@ func TestVerifyCatchesADeclarationWithNoData(t *testing.T) {
 
 func TestFontsReportsWhatAReaderWillSee(t *testing.T) {
 	// Embedded: safe.
-	dst, _ := writeDeckTo(t, fontDeck(pptx.EmbeddedFont{Typeface: "ZZProbeFace", Regular: sfnt}))
+	dst, _ := writeDeckTo(t, fontDeck(pptx.EmbeddedFont{Typeface: "ZZProbeFace", Regular: probeSfnt(t)}))
 	reports := mustFonts(t, dst)
 	got := find(reports, "ZZProbeFace")
 	if got == nil || !got.Embedded || !got.Safe() {

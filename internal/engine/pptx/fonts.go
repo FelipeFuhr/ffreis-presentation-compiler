@@ -37,34 +37,37 @@ const (
 
 // EmbeddedFont is one typeface's data, to travel inside the package.
 //
-// **This is unproven, and the honest state of it is worth reading before
-// relying on it.**
+// Hand in plain sfnt -- the bytes of a .ttf or .otf. The writer wraps each
+// variant in the EOT container PowerPoint expects; eot.go holds the layout
+// and how it was derived.
 //
-// The data written here is plain sfnt -- the bytes of a .ttf or .otf.
-// ECMA-376 describes the part as font data and does not mandate a container.
-// PowerPoint itself writes something else: a real .pptx to hand has
-// `ppt/fonts/*.fntdata` beginning with an EOT (Embedded OpenType) header --
-// size, font-data size, version 0x00020002 -- wrapping MTX-compressed font
-// data, with no sfnt table tags anywhere in the file.
+// **WHAT IS AND IS NOT ESTABLISHED**, because this was shipped once in a
+// form that could not have worked.
 //
-// So sfnt may well not be accepted, and **it could not be tested**. The
-// obvious oracle is a reader rendering a font no machine has installed, and
-// that experiment was run: a font renamed to a unique family, embedded,
-// converted by LibreOffice. It substituted. Then the control -- the
-// real-world .pptx carrying Microsoft's own EOT fonts for a typeface not
-// installed on this machine -- was converted by the same LibreOffice. It
-// substituted too.
+// Established, by reading a real PowerPoint-authored .pptx that embeds two
+// faces: the container is EOT, its MagicNumber is 0x504C, its Version is
+// 0x00020002, and its header states the family name, weight, slope and
+// fsType a reader matches against the typeface a slide names. This package
+// previously wrote the .ttf bytes with no header at all -- well-formed OOXML
+// pointing at data no reader could identify -- and every check passed,
+// because every check was about the package and not about the font.
 //
-// **LibreOffice ignores embedded fonts in .pptx regardless of format.** That
-// removes the only reader available here, so neither acceptance nor rejection
-// of this format can be demonstrated, and writing an EOT encoder would be
-// binary-format code with no way to tell whether it worked.
+// NOT established: whether PowerPoint requires the payload to be
+// MTX-compressed. Its own files set TTEMBED_TTCOMPRESSED and the one examined
+// began 03 01 49 20, which is no sfnt magic. This writes a valid uncompressed
+// EOT, which the format permits.
 //
-// Hence: embedding is off by default, and the answer a deck should actually
-// rely on is naming a typeface the reader is known to have -- which `Fonts`
-// reports on every build. When a licensed PowerPoint becomes available (see
-// acceptance/powerpoint), testing this is the first thing worth doing with
-// it.
+// There is still no reader here that can settle it. The obvious oracle was
+// run: a font renamed to a unique family, embedded, converted by LibreOffice.
+// It substituted. Then the control -- the real .pptx carrying Microsoft's own
+// EOT fonts for a face not installed on this machine -- converted by the same
+// LibreOffice. It substituted too. **LibreOffice ignores embedded fonts in
+// .pptx regardless of format**, so neither acceptance nor rejection can be
+// demonstrated locally; acceptance/powerpoint is where that belongs.
+//
+// What changed in the meantime is that the container is now correct as far as
+// it can be checked: built from the font's own tables, parsed back by
+// eotHeaderOf, and gated by Verify's font-container rule.
 type EmbeddedFont struct {
 	Typeface string
 	// Each variant is optional; a nil variant is simply not declared, and
@@ -163,9 +166,9 @@ func fontPartName(index int, suffix string) string {
 //
 // firstRelID is where the font relationships start; the caller owns the rest
 // of presentation.xml.rels and so owns that number.
-func fontParts(fonts []EmbeddedFont, firstRelID int) (parts []part, rels string, list string) {
+func fontParts(fonts []EmbeddedFont, firstRelID int) (parts []part, rels string, list string, err error) {
 	if len(fonts) == 0 {
-		return nil, "", ""
+		return nil, "", "", nil
 	}
 
 	var relBuf, listBuf strings.Builder
@@ -183,7 +186,14 @@ func fontParts(fonts []EmbeddedFont, firstRelID int) (parts []part, rels string,
 		fmt.Fprintf(&listBuf, `<p:embeddedFont><p:font typeface="%s"/>`, escape(f.Typeface))
 		for _, v := range variants {
 			name := fontPartName(i, v.suffix)
-			parts = append(parts, part{name: name, body: v.data})
+			// Wrapped here rather than at load time so a font whose licence
+			// forbids embedding fails the build that tried to embed it,
+			// naming the face and the fsType bits -- not silently later.
+			data, wrapErr := eotWrap(v.data)
+			if wrapErr != nil {
+				return nil, "", "", fmt.Errorf("embed %s %s: %w", f.Typeface, v.suffix, wrapErr)
+			}
+			parts = append(parts, part{name: name, body: data})
 			fmt.Fprintf(&relBuf,
 				`  <Relationship Id="rId%d" Type="%s" Target="%s"/>`+"\n",
 				rel, fontRelType, strings.TrimPrefix(name, "ppt/"))
@@ -195,9 +205,9 @@ func fontParts(fonts []EmbeddedFont, firstRelID int) (parts []part, rels string,
 	listBuf.WriteString("</p:embeddedFontLst>")
 
 	if len(parts) == 0 {
-		return nil, "", ""
+		return nil, "", "", nil
 	}
-	return parts, relBuf.String(), listBuf.String()
+	return parts, relBuf.String(), listBuf.String(), nil
 }
 
 // fontScheme renders the theme's major and minor latin typeface.

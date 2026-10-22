@@ -5,7 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,8 +16,10 @@ import (
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine/chrome"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine/pptx"
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/fontsource"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/gen"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/logx"
+	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/pptxfonts"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/pptxlayout"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/render"
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/seo"
@@ -49,9 +51,10 @@ func parseBuildOptions(args []string, stderr io.Writer) (*buildOptions, error) {
 	fs.StringVar(&o.formats, "formats", "html,pdf", "comma-separated outputs: html, pdf, png, pptx")
 	fs.StringVar(&o.pptxFont, "pptx-font", "",
 		"typeface every pptx run names; empty uses the theme's pptx_font, then what the render measured")
-	fs.BoolVar(&o.embedFont, "pptx-embed-fonts", false,
-		"ship the theme's pptx/fonts/*.ttf inside the package (UNVERIFIED: PowerPoint writes EOT, "+
-			"this writes sfnt, and no reader available here honours embedded pptx fonts at all)")
+	fs.BoolVar(&o.embedFont, "pptx-embed-fonts", true,
+		"carry the deck's typeface inside the package, from the theme's pptx/fonts or fonts "+
+			"directory or from the fonts installed on this machine, so it cannot substitute on "+
+			"someone else's (a face Office ships is named rather than embedded)")
 	fs.StringVar(&o.pptxMode, "pptx-mode", string(pptxlayout.ModeNative),
 		"pptx shape mode: native (editable; geometry from the theme's pptx/ specs) or image (exact; one picture per slide)")
 	fs.StringVar(&o.slug, "slug", "", "artifact basename (default: the deck directory name)")
@@ -180,7 +183,7 @@ func runBuild(args []string, stdout, stderr io.Writer) int {
 		font = dominantFont(shapes)
 	}
 
-	embedded, fontNotes, err := loadEmbeddedFonts(opts.embedFont, th, font)
+	embedded, fontNotes, err := embedFonts(context.Background(), opts.embedFont, th, font)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "build: %v\n", err)
 		return exitError
@@ -379,57 +382,34 @@ func resolvePPTXFont(flag string, th *theme.Theme) string {
 	return ""
 }
 
-// loadEmbeddedFonts reads the theme's sfnt files for embedding.
+// embedFonts resolves the deck's typeface to font bytes the package carries.
 //
-// Reports rather than fails when asked to embed a theme that ships no font
-// files: the request is a preference, and refusing to build over it would be
-// worse than building a deck whose typeface may substitute -- which is the
-// state every deck was in before this existed, and which Fonts() names.
-func loadEmbeddedFonts(embed bool, th *theme.Theme, typeface string) ([]pptx.EmbeddedFont, []string, error) {
-	if !embed || th == nil {
+// Where it looks, in order: the theme's pptx/fonts directory, the theme's own
+// fonts directory, then the fonts installed on this machine. The last is the
+// one that matters in practice -- a deck set in a face the author installed
+// but never vendored is the normal case, and refusing to look there meant the
+// only embeddable typefaces were ones somebody remembered to copy into the
+// repo.
+//
+// The policy lives in internal/pptxfonts; this is only the wiring that says
+// which directories a theme contributes.
+func embedFonts(ctx context.Context, embed bool, th *theme.Theme, typeface string) ([]pptx.EmbeddedFont, []string, error) {
+	if !embed {
 		return nil, nil, nil
 	}
-	files, err := th.PPTXFonts()
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(files) == 0 {
-		return nil, []string{fmt.Sprintf(
-			"-pptx-embed-fonts was asked for but theme %q ships no sfnt files in %s, so nothing was embedded",
-			th.Name, theme.PPTXFontDir)}, nil
-	}
 
-	face := typeface
-	if face == "" {
-		// Embedding needs a name to declare, and an unnamed embedded font is
-		// one nothing can reference.
-		face = pptx.DefaultFont
-		if len(th.Fonts) > 0 && strings.TrimSpace(th.Fonts[0]) != "" {
-			face = strings.TrimSpace(th.Fonts[0])
-		}
+	opt := fontsource.Options{Runner: fontRunner}
+	if th != nil {
+		opt.Dirs = []string{filepath.Join(th.Dir, theme.PPTXFontDir), th.FontsDir()}
 	}
+	return pptxfonts.Load(ctx, typeface, opt)
+}
 
-	out := pptx.EmbeddedFont{Typeface: face}
-	var loaded []string
-	for _, f := range files {
-		body, err := os.ReadFile(f.Path)
-		if err != nil {
-			return nil, nil, fmt.Errorf("read %s: %w", f.Path, err)
-		}
-		switch f.Variant {
-		case "regular":
-			out.Regular = body
-		case "bold":
-			out.Bold = body
-		case "italic":
-			out.Italic = body
-		case "boldItalic":
-			out.BoldItalic = body
-		}
-		loaded = append(loaded, f.Variant)
-	}
-	return []pptx.EmbeddedFont{out}, []string{fmt.Sprintf(
-		"embedding %s (%s) so the typeface cannot substitute", face, strings.Join(loaded, ", "))}, nil
+// fontRunner is this command's boundary onto fontconfig, a variable for the
+// same reason pptxRunner is: a test must be able to drive a build without the
+// machine's own font set deciding what the output contains.
+var fontRunner fontsource.Runner = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return osexec.CommandContext(ctx, name, args...).Output() //nolint:gosec // fontsource.Tool, with a pattern it built
 }
 
 // wants reports whether f is among the requested formats.
