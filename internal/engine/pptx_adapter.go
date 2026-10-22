@@ -10,18 +10,26 @@ import (
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine/pptx"
 )
 
-// PPTXRenderer writes a PowerPoint file in image mode: one full-bleed render
+// PPTXRenderer writes a PowerPoint file. With Shapes populated a slide becomes
+// native and editable; without, it is image mode: one full-bleed render
 // per slide, with the slide's text kept in the speaker notes.
 //
-// The honest framing, repeated in the docs: fidelity is exact and nothing is
-// editable. The deck source stays the editable artefact; this is for handing a
-// file to someone who expects .pptx.
+// The honest framing for each, repeated in the docs: image mode is exact and
+// nothing in it can be changed; native mode is editable but its geometry comes
+// from the theme's PPTX layout spec rather than from the CSS, so it does not
+// match the PDF pixel for pixel. Neither replaces the other, which is why the
+// mode is a flag. The deck source remains the authoritative artefact in both.
 type PPTXRenderer struct {
 	Client Capturer
 	Scale  float64
 	// Notes supplies per-slide speaker notes, indexed from 1. Missing entries
 	// simply produce an empty notes page.
 	Notes map[int]string
+	// Shapes supplies per-slide native shapes, indexed from 1, the same shape
+	// as Notes. A slide with no entry keeps its full-bleed image, which is how
+	// a deck can be partly editable: a layout the theme has not described in
+	// PPTX terms falls back rather than failing.
+	Shapes map[int][]pptx.Shape
 }
 
 // NewPPTXRenderer returns a PPTX adapter backed by headless Chrome.
@@ -75,7 +83,11 @@ func (r *PPTXRenderer) Render(ctx context.Context, job Job) (string, error) {
 
 	deck := pptx.Deck{WidthIn: job.Size.WidthIn, HeightIn: job.Size.HeightIn, Lang: job.Lang}
 	for _, shot := range shots {
-		deck.Slides = append(deck.Slides, pptx.Slide{PNG: shot.PNG, Notes: r.Notes[shot.Index]})
+		deck.Slides = append(deck.Slides, pptx.Slide{
+			PNG:    shot.PNG,
+			Notes:  r.Notes[shot.Index],
+			Shapes: r.Shapes[shot.Index],
+		})
 	}
 
 	out := filepath.Join(job.OutDir, job.Slug+".pptx")

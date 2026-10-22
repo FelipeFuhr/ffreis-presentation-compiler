@@ -34,11 +34,23 @@ const EMUPerInch = 914400
 
 // Slide is one page of the deck.
 type Slide struct {
-	// PNG is the rendered image; it fills the whole slide.
+	// PNG is the rendered image; it fills the whole slide. Used when Shapes is
+	// empty, which is image mode and also the per-slide fallback for a layout
+	// the theme has not described in PPTX terms.
 	PNG []byte
 	// Notes is the slide's text, preserved as speaker notes.
 	Notes string
+	// Shapes, when non-empty, makes this slide native: real text boxes,
+	// tables and pictures instead of one flat image. PNG is then ignored.
+	//
+	// This package deliberately knows nothing about layouts or themes -- it
+	// renders the shapes it is handed. Deciding which shapes a slide gets, or
+	// that it gets none and falls back to its image, belongs to the caller.
+	Shapes []Shape
 }
+
+// Native reports whether this slide is editable rather than a flat image.
+func (s Slide) Native() bool { return len(s.Shapes) > 0 }
 
 // Deck is what Write serialises.
 type Deck struct {
@@ -188,10 +200,13 @@ func writeParts(z *zip.Writer, d Deck) error {
 
 	for i, s := range d.Slides {
 		n := i + 1
+		images := slideImages(s)
+		for j, body := range images {
+			parts = append(parts, part{mediaName(n, j, s.Native()), body})
+		}
 		parts = append(parts,
-			part{fmt.Sprintf("ppt/media/slide%d.png", n), s.PNG},
 			part{fmt.Sprintf("ppt/slides/slide%d.xml", n), []byte(slideXML(n, d))},
-			part{fmt.Sprintf("ppt/slides/_rels/slide%d.xml.rels", n), []byte(slideRels(n))},
+			part{fmt.Sprintf("ppt/slides/_rels/slide%d.xml.rels", n), []byte(slideRels(n, len(images), s.Native()))},
 			part{fmt.Sprintf("ppt/notesSlides/notesSlide%d.xml", n), []byte(notesXML(s.Notes, d.Lang))},
 			part{fmt.Sprintf("ppt/notesSlides/_rels/notesSlide%d.xml.rels", n), []byte(notesRels(n))},
 		)
@@ -367,7 +382,48 @@ func presentationRels(slides int) string {
 	return b.String()
 }
 
+// slideImages returns the image bodies this slide contributes, in the order
+// their relationships are assigned.
+func slideImages(s Slide) [][]byte {
+	if !s.Native() {
+		return [][]byte{s.PNG}
+	}
+	var out [][]byte
+	for _, sh := range s.Shapes {
+		if sh.Kind == ShapePicture {
+			out = append(out, sh.PNG)
+		}
+	}
+	return out
+}
+
+// mediaName keeps image mode's part names unchanged -- ppt/media/slideN.png --
+// while a native slide, which may carry several pictures or none, numbers them.
+func mediaName(slide, index int, native bool) string {
+	if !native {
+		return fmt.Sprintf("ppt/media/slide%d.png", slide)
+	}
+	return fmt.Sprintf("ppt/media/slide%d-%d.png", slide, index+1)
+}
+
+// Relationship ids within a slide. Images start after the fixed two so the
+// same convention serves a slide with one picture and a slide with six; a
+// dangling r:id is one of the things Verify checks, which is what makes a
+// single convention safe to rely on here.
+const (
+	relSlideLayout = "rId1"
+	relNotesSlide  = "rId2"
+	relFirstImage  = 3
+)
+
+func imageRelID(index int) string { return fmt.Sprintf("rId%d", relFirstImage+index) }
+
 func slideXML(n int, d Deck) string {
+	s := d.Slides[n-1]
+	body := fullBleedPicture(n, d)
+	if s.Native() {
+		body = shapeTree(s, d.Lang)
+	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
        xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -378,7 +434,17 @@ func slideXML(n int, d Deck) string {
       <p:grpSpPr>
         <a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>
           <a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm>
-      </p:grpSpPr>
+      </p:grpSpPr>%s
+    </p:spTree>
+  </p:cSld>
+  <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
+</p:sld>
+`, body)
+}
+
+// fullBleedPicture is image mode: the whole slide is one picture.
+func fullBleedPicture(n int, d Deck) string {
+	return fmt.Sprintf(`
       <p:pic>
         <p:nvPicPr>
           <p:cNvPr id="%d" name="Slide %d"/>
@@ -386,29 +452,59 @@ func slideXML(n int, d Deck) string {
           <p:nvPr/>
         </p:nvPicPr>
         <p:blipFill>
-          <a:blip r:embed="rId2"/>
+          <a:blip r:embed="%s"/>
           <a:stretch><a:fillRect/></a:stretch>
         </p:blipFill>
         <p:spPr>
           <a:xfrm><a:off x="0" y="0"/><a:ext cx="%d" cy="%d"/></a:xfrm>
           <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
         </p:spPr>
-      </p:pic>
-    </p:spTree>
-  </p:cSld>
-  <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
-</p:sld>
-`, n+1, n, emu(d.WidthIn), emu(d.HeightIn))
+      </p:pic>`, n+1, n, imageRelID(0), emu(d.WidthIn), emu(d.HeightIn))
 }
 
-func slideRels(n int) string {
-	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+// shapeTree is native mode. Shape ids start at 2 because the group shape that
+// wraps every slide tree is id 1.
+func shapeTree(s Slide, lang string) string {
+	var b strings.Builder
+	id := 2
+	picture := 0
+	for _, sh := range s.Shapes {
+		switch sh.Kind {
+		case ShapeText:
+			b.WriteString(textBoxXML(id, sh, lang))
+		case ShapeBullets:
+			b.WriteString(bulletsXML(id, sh, lang))
+		case ShapeTable:
+			b.WriteString(tableXML(id, sh, lang))
+		case ShapeRect:
+			b.WriteString(rectXML(id, sh))
+		case ShapePicture:
+			b.WriteString(pictureXML(id, sh, imageRelID(picture)))
+			picture++
+		default:
+			// An unknown kind is dropped rather than guessed at: a shape this
+			// package cannot render is a caller bug, and emitting something
+			// plausible would hide it behind a slide that merely looks wrong.
+			continue
+		}
+		id++
+	}
+	return b.String()
+}
+
+func slideRels(n, images int, native bool) string {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/slide%d.png"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide%d.xml"/>
-</Relationships>
-`, n, n)
+`)
+	fmt.Fprintf(&b, `  <Relationship Id="%s" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>`+"\n", relSlideLayout)
+	fmt.Fprintf(&b, `  <Relationship Id="%s" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide%d.xml"/>`+"\n", relNotesSlide, n)
+	for j := 0; j < images; j++ {
+		fmt.Fprintf(&b, `  <Relationship Id="%s" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/%s"/>`+"\n",
+			imageRelID(j), strings.TrimPrefix(mediaName(n, j, native), "ppt/media/"))
+	}
+	b.WriteString("</Relationships>\n")
+	return b.String()
 }
 
 func notesXML(notes, lang string) string {

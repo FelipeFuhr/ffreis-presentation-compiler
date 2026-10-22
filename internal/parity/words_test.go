@@ -97,12 +97,14 @@ func TestExpectedWordsWalksIntoNestedMapFields(t *testing.T) {
 		Fields: map[string]any{
 			"lead": map[string]any{
 				"label": "Nome do Projeto",
-				"value": "Otimização do Quadro Social",
+				"value": "Título do Deck de Exemplo",
 			},
 		},
 	}
 	got := words(t, s)
-	for _, want := range []string{"nome", "projeto", "otimizacao", "quadro", "social"} {
+	// Words of at least parity.minSignificantWordLen letters, from both the
+	// label and the value: "do" and "de" are too short to carry signal.
+	for _, want := range []string{"nome", "projeto", "titulo", "deck", "exemplo"} {
 		if !got[want] {
 			t.Errorf("ExpectedWords did not walk into the nested lead mapping for %q, got %v", want, got)
 		}

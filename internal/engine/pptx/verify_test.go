@@ -13,6 +13,9 @@ import (
 	"strings"
 	"testing"
 
+	"regexp"
+	"strconv"
+
 	"github.com/FelipeFuhr/ffreis-presentation-compiler/internal/engine/pptx"
 )
 
@@ -278,8 +281,12 @@ func TestVerifyCatchesEveryDefect(t *testing.T) {
 			parts := explode(t, raw)
 			for i := range parts {
 				if parts[i].name == "ppt/slides/_rels/slide1.xml.rels" {
+					// rId3 is the slide's image, which the slide XML
+					// references with r:embed. Renaming rId2 (the notes
+					// slide) would not fire: nothing inside slide1.xml
+					// refers to it.
 					parts[i].body = []byte(strings.Replace(string(parts[i].body),
-						`Id="rId2"`, `Id="rIdGone"`, 1))
+						`Id="rId3"`, `Id="rIdGone"`, 1))
 				}
 			}
 			return rezip(t, parts)
@@ -628,5 +635,174 @@ func TestVerifyIgnoresAnExternalRelationshipTarget(t *testing.T) {
 		for _, f := range findings {
 			t.Logf("  %s", f)
 		}
+	}
+}
+
+// ── native (editable) slides ────────────────────────────────────────────────
+
+// nativeDeck exercises every shape kind on one slide.
+func nativeDeck() pptx.Deck {
+	return pptx.Deck{
+		WidthIn:  13.333,
+		HeightIn: 7.5,
+		Lang:     "pt-BR",
+		Slides: []pptx.Slide{{
+			Notes: "speaker notes survive native mode too",
+			Shapes: []pptx.Shape{
+				{Kind: pptx.ShapeRect, At: pptx.Rect{XIn: 0, YIn: 0, WIn: 13.333, HIn: 7.5}, Fill: "FBF8F1"},
+				{Kind: pptx.ShapeRect, At: pptx.Rect{XIn: 0.6, YIn: 1.9, WIn: 0.03, HIn: 0.5}, Fill: "02ACCF"},
+				{Kind: pptx.ShapeText, At: pptx.Rect{XIn: 0.6, YIn: 0.5, WIn: 11, HIn: 0.4},
+					Text: "VISÃO GERAL", Style: pptx.TextStyle{SizePt: 11, Color: "0E3C45", Caps: true, SpacingPt: 1.5, Font: "Roboto"}},
+				{Kind: pptx.ShapeText, At: pptx.Rect{XIn: 0.6, YIn: 1.0, WIn: 11, HIn: 0.9},
+					Text: "Linha um\nLinha dois", Style: pptx.TextStyle{SizePt: 28, Bold: true, Color: "343B43", Font: "Roboto"}},
+				{Kind: pptx.ShapeBullets, At: pptx.Rect{XIn: 0.6, YIn: 2.5, WIn: 6, HIn: 3},
+					Items: []string{"primeiro", "segundo", "terceiro"},
+					Style: pptx.TextStyle{SizePt: 16, Color: "343B43", LinePct: 120}},
+				{Kind: pptx.ShapeTable, At: pptx.Rect{XIn: 7, YIn: 2.5, WIn: 5.7, HIn: 3},
+					Columns: []string{"Clube", "Sócios"},
+					Rows:    [][]string{{"Clube Ômega", "9,8 milhões"}, {"Clube Zêta", "7,1 milhões"}},
+					Fill:    "02ACCF",
+					Style:   pptx.TextStyle{SizePt: 12, Color: "343B43"}},
+				{Kind: pptx.ShapePicture, At: pptx.Rect{XIn: 11.8, YIn: 0.4, WIn: 1, HIn: 1}, PNG: onePixelPNG},
+			},
+		}},
+	}
+}
+
+func TestNativeSlidePassesVerification(t *testing.T) {
+	// The whole feature rests on this: shapes that a strict reader rejects
+	// would be worse than the flat image they replace.
+	dst := filepath.Join(t.TempDir(), "native.pptx")
+	if err := pptx.Write(dst, nativeDeck()); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	findings, err := pptx.Verify(dst)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	for _, f := range findings {
+		t.Errorf("native slide produced a finding: %s", f)
+	}
+}
+
+func TestNativeSlideEmitsRealPowerPointObjects(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "native.pptx")
+	if err := pptx.Write(dst, nativeDeck()); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	parts, _ := readAll(t, dst)
+	slide := parts["ppt/slides/slide1.xml"]
+
+	for _, want := range []struct{ what, xml string }{
+		{"a real table, not text boxes", "<a:tbl>"},
+		{"table grid columns", "<a:gridCol"},
+		{"a bulleted list", "<a:buChar"},
+		{"an editable text box", `txBox="1"`},
+		{"a picture", "<p:blipFill>"},
+		{"the deck's language on runs", `lang="pt-BR"`},
+		{"theme colour on text", "343B43"},
+		{"OOXML capitalisation rather than upper-cased source", `cap="all"`},
+	} {
+		if !strings.Contains(slide, want.xml) {
+			t.Errorf("native slide is missing %s (%s)", want.what, want.xml)
+		}
+	}
+
+	// Caps must not have rewritten the author's text.
+	if !strings.Contains(slide, "VISÃO GERAL") {
+		t.Error("kicker text is missing")
+	}
+	// A native slide carries no full-bleed image.
+	if strings.Contains(slide, `name="Slide 1"`) {
+		t.Error("a native slide still emitted the image-mode full-bleed picture")
+	}
+	// Its picture must resolve.
+	if !strings.Contains(parts["ppt/slides/_rels/slide1.xml.rels"], "slide1-1.png") {
+		t.Error("the native slide's picture has no image relationship")
+	}
+}
+
+func TestImageModeIsUnchangedByNativeSupport(t *testing.T) {
+	// Native mode must not have perturbed the flat-image path: that is what
+	// ships to anyone who wants exact fidelity.
+	parts, _ := readAll(t, writeDeck(t, pptx.Slide{PNG: onePixelPNG, Notes: "x"}))
+	slide := parts["ppt/slides/slide1.xml"]
+	if !strings.Contains(slide, `name="Slide 1"`) {
+		t.Error("image mode no longer emits the full-bleed picture")
+	}
+	if strings.Contains(slide, "<a:tbl>") || strings.Contains(slide, `txBox="1"`) {
+		t.Error("image mode emitted native shapes")
+	}
+	if _, ok := parts["ppt/media/slide1.png"]; !ok {
+		t.Error("image mode's media part was renamed")
+	}
+}
+
+// ── table geometry ──────────────────────────────────────────────────────────
+
+func TestTableUsesMeasuredRowHeights(t *testing.T) {
+	// Even division was the defect: a header and a two-line body row are not
+	// the same height, and dividing the frame evenly put every table 14-18%
+	// off the reference render.
+	dst := filepath.Join(t.TempDir(), "t.pptx")
+	err := pptx.Write(dst, pptx.Deck{
+		WidthIn: 13.333, HeightIn: 7.5, Lang: "pt-BR",
+		Slides: []pptx.Slide{{Shapes: []pptx.Shape{{
+			Kind:         pptx.ShapeTable,
+			At:           pptx.Rect{XIn: 0.625, YIn: 2, WIn: 12, HIn: 1.5},
+			Columns:      []string{"Clube", "Sócios"},
+			Rows:         [][]string{{"Clube Ômega", "9,8 milhões"}, {"Clube Zêta", "7,1 milhões"}},
+			RowHeightsIn: []float64{0.5, 0.4, 0.6},
+			ColWidthsIn:  []float64{4, 8},
+			Style:        pptx.TextStyle{SizePt: 12},
+		}}}},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	parts, _ := readAll(t, dst)
+	slide := parts["ppt/slides/slide1.xml"]
+
+	// 0.5in, 0.4in, 0.6in as EMU.
+	for _, want := range []string{`h="457200"`, `h="365760"`, `h="548640"`} {
+		if !strings.Contains(slide, want) {
+			t.Errorf("missing measured row height %s", want)
+		}
+	}
+	// Columns: 4in and 8in.
+	for _, want := range []string{`w="3657600"`, `w="7315200"`} {
+		if !strings.Contains(slide, want) {
+			t.Errorf("missing measured column width %s", want)
+		}
+	}
+}
+
+func TestTableGridAlwaysTotalsItsFrame(t *testing.T) {
+	// A grid that does not sum to its own xfrm makes PowerPoint re-flow the
+	// table, which would silently undo the measurement.
+	dst := filepath.Join(t.TempDir(), "t.pptx")
+	err := pptx.Write(dst, pptx.Deck{
+		WidthIn: 13.333, HeightIn: 7.5,
+		Slides: []pptx.Slide{{Shapes: []pptx.Shape{{
+			Kind: pptx.ShapeTable,
+			At:   pptx.Rect{XIn: 0, YIn: 0, WIn: 10, HIn: 3},
+			Rows: [][]string{{"a", "b", "c"}, {"d", "e", "f"}},
+			// Deliberately short of the 10in frame.
+			ColWidthsIn: []float64{3.3, 3.3, 3.3},
+		}}}},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	parts, _ := readAll(t, dst)
+	slide := parts["ppt/slides/slide1.xml"]
+
+	var sum int64
+	for _, m := range regexp.MustCompile(`<a:gridCol w="(\d+)"/>`).FindAllStringSubmatch(slide, -1) {
+		v, _ := strconv.ParseInt(m[1], 10, 64)
+		sum += v
+	}
+	if want := int64(10 * 914400); sum != want {
+		t.Errorf("grid columns total %d EMU, want exactly the frame's %d", sum, want)
 	}
 }

@@ -165,10 +165,75 @@ other generators share — that part is d2's own CLI, unrelated to the rewrite.
 
 ## PPTX export
 
-`-formats pptx` writes a PowerPoint file in **image mode**: each slide is the
-render, and the slide's kicker, title and `notes` are preserved as speaker
-notes. Fidelity is exact; nothing is editable. The deck source stays the
-editable artefact — this is for handing a file to someone who expects `.pptx`.
+`-formats pptx` writes a PowerPoint file in one of two modes,
+`-pptx-mode=native` (the default) or `-pptx-mode=image`. Neither replaces the
+other, which is why it is a flag:
+
+| | `native` | `image` |
+| --- | --- | --- |
+| Content | text boxes, `a:tbl` tables, pictures | one full-bleed render |
+| Editable | yes | no |
+| Matches the PDF | close, not exact | exactly |
+| Needs a browser | yes, to measure | yes, to render |
+
+**Native is the default because a deck handed to someone is usually handed
+over to be worked on**, and a file that cannot be edited is a dead end for
+them. Image mode stays for when the file must look precisely like the PDF
+that was reviewed.
+
+Speaker notes are written in both.
+
+### Native mode: content from the model, geometry from the render
+
+A theme describes each layout in PPTX terms as `<theme>/pptx/<layout>.yaml`,
+and **the shapes in it name CSS selectors rather than coordinates**:
+
+```yaml
+background: paper
+shapes:
+  - { kind: text,    from: title,  measure: .slide-title }
+  - { kind: table,   fill: accent, measure: .deck-table }
+  - { kind: bullets, from: items,  measure: .checklist }
+```
+
+The *content* comes from the deck model, so a table is a real table. The
+*geometry and formatting* come from the browser's own layout of that element,
+read over CDP by `internal/pptxlayout/measure.js`.
+
+**The first version of these specs stated every rectangle by hand, and it was
+wrong twice over.** Absolute positions leave a hole wherever an optional shape
+is skipped, and a table's rows were divided evenly instead of sized by
+content. Measured against the reference render, tables were 14–18% of pixels
+different. Switching to measurement took tables to 10.2% and the editable set
+overall from 11.7% to 8.2%, against a 2.9% floor (what two *identical* images
+score, i.e. LibreOffice's rasterisation noise). Sections landed at 1.4%, below
+the floor.
+
+What measurement cannot fix is text re-flow: PowerPoint breaks lines inside a
+text box itself, so bullets barely improved (8.2% → 7.8%). Emitting one box
+per line would close that and destroy the editability the mode exists for.
+
+- **A spec's explicit `style:` wins over the measured value**; booleans are
+  ORed, since a spec cannot say "not bold" by omitting bold. Change the CSS,
+  which is the thing being described.
+- **`at: [x, y, w, h]`** in inches still works, for a shape with no DOM
+  counterpart. A zero width or height on a picture means `auto`, derived from
+  the file's own pixels — forcing both squashed a 96×81 crest by 16%.
+- **`asset:`** places an image from the theme's own directory, and **`when:`**
+  gates a shape on a field — between them they express a template's
+  `{{ with get .Fields "logo" }}` lockup.
+- **Intrinsics** `slide.number` and `deck.{title,subtitle,client,footer}`
+  reach the values that are not slide chrome, which is what the footer and the
+  cover need.
+- **Measurement failure falls back wholesale**, not partly: a spec written
+  against measurement has no usable geometry without it, and half-placed
+  shapes are worse than the flat image. The build says so.
+- **A layout with no spec keeps its rendered image, per slide.** A deck is
+  therefore allowed to be partly editable, which is what makes this usable
+  before every layout is described. `build` reports the count and names the
+  layouts that fell back.
+
+The deck source remains the authoritative artefact in both modes.
 
 **The non-obvious part is the zip, not the XML.** `archive/zip`'s ordinary
 `Create`/`CreateHeader` path streams each entry and appends a *data descriptor*,
@@ -852,6 +917,7 @@ internal/deck/                     content model and loader
 internal/theme/                    theme loading, template FuncMap
 internal/contract/                 field-vocabulary validation (contract.yaml)
 internal/pathsafe/                 the one path-containment helper, shared by theme/gen/contract
+internal/pptxlayout/               native pptx: theme specs + measure.js
 internal/render/                   document shell + slide assembly (base.gohtml)
 internal/check/                    measured checks (probe.js)
 internal/golden/                   perceptual PNG diff for visual regression

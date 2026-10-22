@@ -562,7 +562,7 @@ func TestValidateAcceptsACSVSourcedTableWithNoContractChange(t *testing.T) {
 	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		t.Fatalf("mkdir data: %v", err)
 	}
-	csv := "Clube,Arrecadação\nGrêmio,\"R$ 90 milhões\"\n"
+	csv := "Clube,Arrecadação\nClube Ômega,\"R$ 90 milhões\"\n"
 	if err := os.WriteFile(filepath.Join(dataDir, "bench.csv"), []byte(csv), 0o600); err != nil {
 		t.Fatalf("write bench.csv: %v", err)
 	}
