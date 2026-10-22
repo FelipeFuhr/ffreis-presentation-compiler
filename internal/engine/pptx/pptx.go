@@ -104,6 +104,19 @@ func Write(dst string, d Deck) error {
 		return fmt.Errorf("pptx: close %s: %w", tmpPath, err)
 	}
 
+	// Verify before the rename, never after: the temp file is still the only
+	// copy, so a package that fails is removed by the deferred cleanup and the
+	// destination is never touched. Four defects shipped from here, each one
+	// accepted by every reader this repo had; an opt-in check would not have
+	// caught any of them, because the gap was never in the writing.
+	findings, err := Verify(tmpPath)
+	if err != nil {
+		return fmt.Errorf("pptx: verify the package just written: %w", err)
+	}
+	if len(findings) > 0 {
+		return &FindingsError{Path: dst, Findings: findings}
+	}
+
 	if err := os.Rename(tmpPath, dst); err != nil {
 		return fmt.Errorf("pptx: rename into place at %s: %w", dst, err)
 	}

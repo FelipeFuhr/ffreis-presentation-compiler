@@ -174,11 +174,21 @@ editable artefact — this is for handing a file to someone who expects `.pptx`.
 `Create`/`CreateHeader` path streams each entry and appends a *data descriptor*,
 setting general-purpose bit 3 and leaving CRC and sizes zero in the local
 header. That is valid ZIP, and python-pptx reads such a file without complaint —
-but LibreOffice refuses the whole document with nothing but "source file could
-not be loaded". `internal/engine/pptx` therefore compresses each part up front
-and writes through `CreateRaw` with CRC and sizes populated. `pptx_test.go`
-asserts bit 3 is clear on every local header, because the failure mode gives you
-no clue where to look.
+but LibreOffice refused *this* writer's output with nothing but "source file
+could not be loaded". `internal/engine/pptx` therefore compresses each part up
+front and writes through `CreateRaw` with CRC and sizes populated.
+`verify.go`'s `data-descriptor` rule asserts bit 3 is clear on every local
+header, because the failure mode gives you no clue where to look.
+
+> **Correction, measured later:** "LibreOffice refuses data descriptors" is
+> **not** true as a general rule, and this file used to say it was. A
+> third-party `.pptx` with bit 3 set on all 248 entries *and*
+> `[Content_Types].xml` not first converts in LibreOffice without complaint.
+> So something else about this writer's streamed output was the actual cause,
+> and it was never isolated. The remedy stands — writing CRC and sizes up
+> front is strictly more compatible — but do not repeat the general claim, and
+> treat `data-descriptor` and `content-types-first` in `verify.go` as
+> invariants of *our* output rather than as defects in anyone else's.
 
 **`CreateRaw` writes exactly the header you hand it, and that is the whole
 hazard.** Every default `CreateHeader` derives on your behalf is simply absent.
@@ -244,6 +254,58 @@ local-only: no workflow runs it, and it `exit 0`s when `soffice` is absent, so
 its silence means nothing. Treat it as one lenient reader's opinion, not as
 proof the file opens. The reader whose opinion actually matters is the one
 below.
+
+## Self-verification (`internal/engine/pptx/verify.go`)
+
+**`Write` verifies its own output before renaming the temp file into place**, so
+an invalid package cannot reach the destination at all. Four defects shipped
+from this writer before it existed, each accepted by every reader the repo had.
+The audits that eventually caught them were hand-written throwaway scripts;
+this is those audits made permanent.
+
+Sixteen rules, every one corresponding to something that actually went wrong or
+to something a hand audit had to check:
+
+- **Container:** `zip-version`, `zip-mod-date`, `data-descriptor`,
+  `zip-sizes`, `entry-name`, `entry-count`, `encrypted`,
+  `content-types-first`
+- **Package:** `content-type`, `xml-well-formed`, `relationship-target`,
+  `relationship-id`
+- **Presentation:** `slide-id-list`, `theme-per-master`, `slide-size`,
+  `media-integrity`
+
+- **`content-type` checks the *right* type, not merely a type.** Every `.xml`
+  part matches the `xml` Default, so a PresentationML part whose `Override` is
+  missing silently becomes `application/xml` — still typed, and wrong. The
+  parts whose type is dictated are checked against the type they must carry.
+- **`media-integrity` fully decodes each PNG** rather than sniffing the
+  signature. A slide image that was begun and abandoned has a valid signature
+  and valid chunk CRCs; only decompressing shows the stream is short.
+- **`theme-per-master` compares masters only.** The presentation part
+  legitimately shares the slide master's theme — PowerPoint's own output does —
+  so a broader "one theme per part" rule would reject conformant files.
+- **`TestVerifyCatchesEveryDefect` is the selftest**, in the same spirit as
+  `check-selftest`: it corrupts one thing per case and fails unless that exact
+  rule fires. A verifier that silently stopped enforcing a rule would otherwise
+  look exactly like a clean build. `TestVerifyAcceptsARebuiltPackage` guards
+  the test machinery itself — the fixture builder has to mirror `add()`, or
+  every fixture would carry extra findings and the single-rule assertions would
+  mean nothing.
+
+**Scope, and it matters.** These are invariants of *this writer's* output, not
+a general OOXML conformance suite, and some are stricter than "will it open". A
+third-party `.pptx` to hand has data descriptors on all 248 entries *and*
+`[Content_Types].xml` not first, and LibreOffice converts it without complaint;
+both remain findings here because this writer deliberately does neither and a
+regression would be a real change in the one area that has already shipped
+three container defects. **Do not point `Verify` at someone else's file and
+read its findings as defects in that file.** That is also why there is no
+`verify` subcommand on the CLI — it would invite exactly that misuse.
+
+Measured against the real history: the file with the zero zip version reports
+559 findings, the one that also had the bad DOS date reports 745, the one with
+only the shared theme reports 1, and the current output reports 0 — as do
+PowerPoint's own repaired copy of our file and a python-pptx-authored deck.
 
 ## PowerPoint acceptance (`acceptance/powerpoint/`)
 

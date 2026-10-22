@@ -1,8 +1,12 @@
 package engine_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,8 +205,25 @@ func (f *fakeCapturer) CaptureAll(_ context.Context, _, selector string, scale f
 	return f.shots, f.err
 }
 
+// realPNG is a 1x1 grey PNG.
+//
+// The fake capturer has to hand back *decodable* images. pptx.Write verifies
+// its own output and rejects a package whose media will not decode, which is
+// exactly the point of that rule: a placeholder like []byte("\x89PNG-one")
+// has a plausible first byte and would have shipped a package no reader can
+// render a slide from.
+func realPNG(level uint8) []byte {
+	img := image.NewGray(image.Rect(0, 0, 1, 1))
+	img.SetGray(0, 0, color.Gray{Y: level})
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		panic(err)
+	}
+	return buf.Bytes()
+}
+
 func twoShots() []chrome.Shot {
-	return []chrome.Shot{{Index: 1, PNG: []byte("\x89PNG-one")}, {Index: 2, PNG: []byte("\x89PNG-two")}}
+	return []chrome.Shot{{Index: 1, PNG: realPNG(0x11)}, {Index: 2, PNG: realPNG(0xee)}}
 }
 
 func TestPNGRendererWritesOneFilePerSlide(t *testing.T) {
