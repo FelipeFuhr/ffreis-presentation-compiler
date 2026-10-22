@@ -5,16 +5,17 @@ responsive while PowerPoint is blocked. This module is the deadline and the
 watcher: it polls for a modal dialog, enforces a hard timeout, and guarantees
 that whatever PowerPoint the worker started is gone before it returns.
 
-The verdict deliberately distinguishes four outcomes, because they mean
+The verdict deliberately distinguishes five outcomes, because they mean
 different things to a test:
 
-  opened    PowerPoint accepted the file and the slides exported.
-  dialog    PowerPoint stopped to ask something -- a repair prompt or an
-            error box. Treated as a rejection, with the text captured.
-  error     The COM call failed outright (an exception, no dialog). Also a
-            rejection, and the normal one when a package is malformed enough.
-  timeout   Nothing came back in time. Not a pass and not a clean rejection;
-            an inconclusive run that needs a human.
+  opened        PowerPoint accepted the file and the slides exported.
+  dialog        PowerPoint stopped to ask something -- a repair prompt or an
+                error box. A rejection, with the text captured.
+  error         The COM call failed outright (an exception, no dialog). Also a
+                rejection, and the normal one for a malformed package.
+  timeout       Nothing came back in time. Not a pass and not a clean
+                rejection: an inconclusive run that needs a human.
+  precondition  We declined to run at all (a PowerPoint was already open).
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import subprocess
 import sys
 import time
 
+import artifacts
 import dialog_guard
 
 # Generous: a cold PowerPoint on a fresh VM snapshot can take tens of seconds
@@ -33,6 +35,7 @@ import dialog_guard
 # point of the deadline is to end a *hang*, not to measure performance.
 DEFAULT_TIMEOUT_S = 240.0
 POLL_INTERVAL_S = 1.0
+WORKER_REAP_S = 15.0
 
 OPENED = "opened"
 DIALOG = "dialog"
@@ -74,8 +77,7 @@ class Verdict:
             lines.append("  PowerPoint version: %s" % self.powerpoint_version)
         for dialog in self.dialogs:
             lines.append("  dialog %r" % (dialog.get("title") or "<untitled>"))
-            for text in dialog.get("controls", []):
-                lines.append("      | %s" % text)
+            lines.extend("      | %s" % text for text in dialog.get("controls", []))
         if self.screenshot:
             lines.append("  screenshot: %s" % self.screenshot)
         if self.worker_stderr.strip():
@@ -84,11 +86,21 @@ class Verdict:
         return "\n".join(lines)
 
 
+@dataclasses.dataclass
+class _Watch:
+    """What the polling loop observed, before it is turned into a Verdict."""
+
+    dialogs: list[dict] = dataclasses.field(default_factory=list)
+    screenshot: str | None = None
+    timed_out: bool = False
+
+
 def _read_json(path: str) -> dict:
     try:
         with open(path, encoding="utf-8") as fh:
             return json.load(fh)
-    except Exception:  # noqa: BLE001 - absent or half-written is normal here
+    except (OSError, ValueError):
+        # Absent or half-written is the normal case while the worker runs.
         return {}
 
 
@@ -96,8 +108,82 @@ def _read_text(path: str) -> str:
     try:
         with open(path, encoding="utf-8") as fh:
             return fh.read()
-    except Exception:  # noqa: BLE001
+    except OSError:
         return ""
+
+
+def _owned_pids(run: artifacts.Run) -> list[int]:
+    return _read_json(run.pids).get("pids") or []
+
+
+def _spawn(pptx: str, run: artifacts.Run) -> subprocess.Popen:
+    worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ppt_worker.py")
+    return subprocess.Popen(
+        [sys.executable, "-u", worker, "--pptx", pptx, "--artifacts-dir", run.root],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+    )
+
+
+def _watch(proc: subprocess.Popen, run: artifacts.Run, timeout_s: float) -> _Watch:
+    """Poll until the worker exits, a dialog appears, or the deadline passes."""
+    deadline = time.monotonic() + timeout_s
+    while proc.poll() is None:
+        dialogs = dialog_guard.visible_dialogs(_owned_pids(run))
+        if dialogs:
+            return _Watch(dialogs, dialog_guard.screenshot(run.path(artifacts.DIALOG_SHOT)))
+        if time.monotonic() >= deadline:
+            return _Watch(
+                dialog_guard.visible_dialogs(_owned_pids(run)),
+                dialog_guard.screenshot(run.path(artifacts.TIMEOUT_SHOT)),
+                timed_out=True,
+            )
+        time.sleep(POLL_INTERVAL_S)
+    return _Watch()
+
+
+def _reap(proc: subprocess.Popen, run: artifacts.Run) -> tuple[str, str]:
+    """Make sure neither the worker nor its PowerPoint survives this call."""
+    owned = _owned_pids(run)
+    if proc.poll() is None:
+        # Kill PowerPoint first: the worker is parked inside a COM call and
+        # will not return until the thing it is calling is gone.
+        dialog_guard.terminate(owned)
+        try:
+            proc.wait(timeout=WORKER_REAP_S)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    stdout, stderr = proc.communicate()
+    dialog_guard.terminate(owned)
+    return stdout or "", stderr or ""
+
+
+def _decide(watch: _Watch, result: dict, stage: str | None, returncode: int | None, timeout_s: float,
+            stdout: str, stderr: str) -> Verdict:
+    common = {
+        "stage": stage,
+        "slide_count": result.get("slide_count"),
+        "exports": result.get("exports") or [],
+        "dialogs": watch.dialogs,
+        "screenshot": watch.screenshot,
+        "powerpoint_version": result.get("powerpoint_version"),
+        "worker_exit": returncode,
+        "worker_stdout": stdout,
+        "worker_stderr": stderr,
+        "result": result,
+    }
+    if watch.dialogs:
+        titles = ", ".join(repr(d.get("title") or "<untitled>") for d in watch.dialogs)
+        return Verdict(DIALOG, "PowerPoint raised a dialog (%s) and was not answered" % titles, **common)
+    if watch.timed_out:
+        return Verdict(TIMEOUT, "no verdict within %.0fs" % timeout_s, **common)
+    if result.get("ok"):
+        return Verdict(OPENED, "opened and exported %s slides" % result.get("slide_count"), **common)
+    detail = result.get("error") or "no detail"
+    kind = result.get("error_type") or "exit %s" % returncode
+    return Verdict(ERROR, "PowerPoint refused the file: %s: %s" % (kind, detail), **common)
 
 
 def open_in_powerpoint(
@@ -105,15 +191,9 @@ def open_in_powerpoint(
     artifacts_dir: str,
     timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> Verdict:
-    """Open `pptx` once in a PowerPoint instance created for this call."""
-    os.makedirs(artifacts_dir, exist_ok=True)
-    slides_dir = os.path.join(artifacts_dir, "slides")
-    result_path = os.path.join(artifacts_dir, "worker-result.json")
-    progress_path = os.path.join(artifacts_dir, "worker-progress.log")
-    pid_path = os.path.join(artifacts_dir, "worker-pids.json")
-    for stale in (result_path, progress_path, pid_path):
-        if os.path.exists(stale):
-            os.remove(stale)
+    """Open `pptx` once, in a PowerPoint instance created for this call."""
+    run = artifacts.Run(artifacts_dir)
+    run.clear()
 
     # Refuse rather than share. DispatchEx is documented to start a new server,
     # but PowerPoint is not reliably multi-instance across versions, so an
@@ -122,94 +202,16 @@ def open_in_powerpoint(
     pre_existing = dialog_guard.powerpoint_pids()
     if pre_existing:
         return Verdict(
-            outcome=PRECONDITION,
-            reason=(
-                "PowerPoint is already running (pids %s). This harness will not drive or "
-                "terminate an instance it did not create -- close PowerPoint and re-run."
-                % sorted(pre_existing)
-            ),
+            PRECONDITION,
+            "PowerPoint is already running (pids %s). This harness will not drive or "
+            "terminate an instance it did not create -- close PowerPoint and re-run."
+            % sorted(pre_existing),
         )
 
-    worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ppt_worker.py")
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-u",
-            worker,
-            "--pptx", pptx,
-            "--out-dir", slides_dir,
-            "--result", result_path,
-            "--progress", progress_path,
-            "--pid-file", pid_path,
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd=os.path.dirname(os.path.abspath(__file__)),
-    )
+    proc = _spawn(pptx, run)
+    watch = _watch(proc, run, timeout_s)
+    stdout, stderr = _reap(proc, run)
 
-    deadline = time.monotonic() + timeout_s
-    dialogs: list[dict] = []
-    shot: str | None = None
-    timed_out = False
-
-    while True:
-        if proc.poll() is not None:
-            break
-
-        owned = _read_json(pid_path).get("pids") or []
-        if owned:
-            dialogs = dialog_guard.visible_dialogs(owned)
-            if dialogs:
-                shot = dialog_guard.screenshot(os.path.join(artifacts_dir, "dialog.bmp"))
-                break
-
-        if time.monotonic() >= deadline:
-            timed_out = True
-            owned = _read_json(pid_path).get("pids") or []
-            dialogs = dialog_guard.visible_dialogs(owned)
-            shot = dialog_guard.screenshot(os.path.join(artifacts_dir, "timeout.bmp"))
-            break
-
-        time.sleep(POLL_INTERVAL_S)
-
-    owned = _read_json(pid_path).get("pids") or []
-    if proc.poll() is None:
-        # Kill PowerPoint first: the worker is parked inside a COM call and will
-        # not return until the thing it is calling is gone.
-        dialog_guard.terminate(owned)
-        try:
-            proc.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-    stdout, stderr = proc.communicate()
-    dialog_guard.terminate(owned)
-
-    result = _read_json(result_path)
-    stage = (_read_text(progress_path).strip().splitlines() or [None])[-1]
-    common = {
-        "stage": stage,
-        "slide_count": result.get("slide_count"),
-        "exports": result.get("exports") or [],
-        "dialogs": dialogs,
-        "screenshot": shot,
-        "powerpoint_version": result.get("powerpoint_version"),
-        "worker_exit": proc.returncode,
-        "worker_stdout": stdout or "",
-        "worker_stderr": stderr or "",
-        "result": result,
-    }
-
-    if dialogs:
-        titles = ", ".join(repr(d.get("title") or "<untitled>") for d in dialogs)
-        return Verdict(DIALOG, "PowerPoint raised a dialog (%s) and was not answered" % titles, **common)
-    if timed_out:
-        return Verdict(TIMEOUT, "no verdict within %.0fs" % timeout_s, **common)
-    if result.get("ok"):
-        return Verdict(OPENED, "opened and exported %s slides" % result.get("slide_count"), **common)
-    return Verdict(
-        ERROR,
-        "PowerPoint refused the file: %s: %s"
-        % (result.get("error_type") or "exit %s" % proc.returncode, result.get("error") or "no detail"),
-        **common,
-    )
+    result = _read_json(run.result)
+    stage = (_read_text(run.progress).strip().splitlines() or [None])[-1]
+    return _decide(watch, result, stage, proc.returncode, timeout_s, stdout, stderr)

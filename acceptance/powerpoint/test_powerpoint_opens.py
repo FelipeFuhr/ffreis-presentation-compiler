@@ -21,19 +21,21 @@ import pytest
 
 import fixtures
 import pngcheck
+import prereq
 import runner
 
 pytestmark = pytest.mark.powerpoint
 
 
 @pytest.fixture(scope="session")
-def verdict(pptx_under_test: str, artifacts_root: str) -> runner.Verdict:
+def verdict(powerpoint_required: bool, pptx_under_test: str, artifacts_root: str) -> runner.Verdict:
     """One open attempt on the real artifact, shared by every assertion below.
 
     Session-scoped deliberately: launching PowerPoint costs tens of seconds and
     a desktop, and splitting "it opened" from "the slides exported" across two
     launches would double that to assert two properties of the same open.
     """
+    prereq.require(powerpoint_required)
     out = runner.open_in_powerpoint(pptx_under_test, os.path.join(artifacts_root, "compiler-output"))
     with open(os.path.join(artifacts_root, "verdict.json"), "w", encoding="utf-8") as fh:
         json.dump(
@@ -108,7 +110,7 @@ def test_every_slide_exports_to_a_readable_image(verdict: runner.Verdict) -> Non
 
 
 def test_the_harness_detects_a_package_powerpoint_must_reject(
-    pptx_under_test: str, fixture_dir: str, artifacts_root: str
+    powerpoint_gate: None, pptx_under_test: str, fixture_dir: str, artifacts_root: str
 ) -> None:
     broken = fixtures.without_content_types(
         pptx_under_test, os.path.join(fixture_dir, "no-content-types.pptx")
@@ -132,7 +134,7 @@ def test_the_harness_detects_a_package_powerpoint_must_reject(
 
 @pytest.mark.diagnostic
 def test_report_whether_this_powerpoint_rejects_zip_version_zero(
-    pptx_under_test: str, fixture_dir: str, artifacts_root: str
+    powerpoint_gate: None, pptx_under_test: str, fixture_dir: str, artifacts_root: str
 ) -> None:
     """Record whether *this* PowerPoint is strict about the field that shipped.
 

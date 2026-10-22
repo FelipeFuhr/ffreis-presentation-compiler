@@ -44,7 +44,7 @@ MUTATION_THRESHOLD ?= 60
 	validate-deck validate-selftest \
 	seo-selftest seo-audit \
 	golden golden-update review metrics \
-	pptx-acceptance
+	pptx-acceptance acceptance-test
 
 ## mutation: run mutation testing with gremlins (slow — CI only)
 mutation:
@@ -423,9 +423,23 @@ review: ## Extract layout metrics and get a model's advisory critique (never blo
 # Needs a licensed Windows + Office VM that cannot live in this repo, so this is
 # never part of quality-gates or CI. See acceptance/powerpoint/README.md.
 PPT_ACCEPT_OUT ?= .bin/powerpoint
+ACCEPTANCE_DIR ?= acceptance/powerpoint
+# Kept in step with acceptance/powerpoint/requirements.txt by hand: there is
+# no Python dependency resolver in this repo to derive it from.
+ACCEPTANCE_PYTEST ?= 9.0.3
 PROFILE ?=
 PPTX    ?=
 SLIDES  ?=
+
+acceptance-test: ## Run the PowerPoint harness's own portable tests (no Windows needed)
+	@command -v uv >/dev/null 2>&1 || { \
+		echo "acceptance-test: uv is not installed -- this target FAILS rather than" >&2; \
+		echo "  skipping, because a skip that reads as a pass is how a gate stops gating." >&2; \
+		exit 1; \
+	}
+	@cd $(ACCEPTANCE_DIR) && uv run --no-project --with "pytest==$(ACCEPTANCE_PYTEST)" -- \
+		python -m pytest -q -p no:cacheprovider
+	@echo "acceptance-test: ok -- the Windows-only tests skipped, as they must off-Windows"
 
 pptx-acceptance: ## Open the built pptx in real PowerPoint in a VM: make pptx-acceptance PROFILE=<name>
 	@[ -n "$(PROFILE)" ] || { \

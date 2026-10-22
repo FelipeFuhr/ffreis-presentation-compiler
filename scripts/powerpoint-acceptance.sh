@@ -72,7 +72,7 @@ infra() {
   exit "$EXIT_INFRA"
 }
 
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile)      PROFILE="${2:-}"; shift 2 || die "--profile needs a value" ;;
     --pptx)         PPTX="${2:-}"; shift 2 || die "--pptx needs a value" ;;
@@ -87,19 +87,19 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ -n "$PROFILE" ] || { usage >&2; die "--profile is required"; }
-[ -n "$PPTX" ] || { usage >&2; die "--pptx is required"; }
+[[ -n "$PROFILE" ]] || { usage >&2; die "--profile is required"; }
+[[ -n "$PPTX" ]] || { usage >&2; die "--pptx is required"; }
 
 PROFILE_FILE="$PROFILE_DIR/$PROFILE.env"
-[ -f "$PROFILE_FILE" ] || die "no such profile: $PROFILE_FILE (see profiles/example.env)"
-[ -f "$PPTX" ] || die "no such .pptx: $PPTX"
+[[ -f "$PROFILE_FILE" ]] || die "no such profile: $PROFILE_FILE (see profiles/example.env)"
+[[ -f "$PPTX" ]] || die "no such .pptx: $PPTX"
 
 # shellcheck source=/dev/null
 . "$PROFILE_FILE"
 
 for var in VM_DISK VM_SNAPSHOT VM_SSH_PORT VM_SSH_USER VM_SSH_KEY GUEST_WORKDIR GUEST_TASK; do
   eval "value=\${$var:-}"
-  [ -n "$value" ] || die "$PROFILE_FILE does not set $var"
+  [[ -n "$value" ]] || die "$PROFILE_FILE does not set $var"
 done
 VM_LABEL="${VM_LABEL:-$PROFILE}"
 VM_MEMORY_MB="${VM_MEMORY_MB:-4096}"
@@ -149,13 +149,13 @@ EOF
 # Invoked only through the EXIT/INT/TERM trap below.
 # shellcheck disable=SC2317
 cleanup() {
-  [ "$CLEANED" -eq 1 ] && return
+  [[ "$CLEANED" -eq 1 ]] && return
   CLEANED=1
-  if [ "$KEEP_VM" -eq 1 ]; then
+  if [[ "$KEEP_VM" -eq 1 ]]; then
     say "--keep-vm: leaving the VM running and the snapshot unrestored"
     return
   fi
-  if [ -n "$QEMU_PID" ] && kill -0 "$QEMU_PID" 2>/dev/null; then
+  if [[ -n "$QEMU_PID" ]] && kill -0 "$QEMU_PID" 2>/dev/null; then
     say "shutting the VM down"
     guest_ssh "shutdown /s /t 0" >/dev/null 2>&1 || true
     for _ in $(seq 1 30); do
@@ -171,14 +171,14 @@ cleanup() {
   fi
   # Always leave the disk as it was found, even after a failure -- otherwise
   # the next run inherits Office's crash state and measures something else.
-  if [ -n "${VM_DISK:-}" ] && [ -f "$VM_DISK" ]; then
+  if [[ -n "${VM_DISK:-}" ]] && [[ -f "$VM_DISK" ]]; then
     qemu-img snapshot -a "$VM_SNAPSHOT" "$VM_DISK" 2>/dev/null \
       || say "WARNING: could not restore snapshot $VM_SNAPSHOT -- the disk is dirty"
   fi
 }
 trap cleanup EXIT INT TERM
 
-if [ "$DRY_RUN" -eq 1 ]; then
+if [[ "$DRY_RUN" -eq 1 ]]; then
   plan
   say "--dry-run: validated the profile and the .pptx; nothing was booted"
   CLEANED=1
@@ -188,8 +188,8 @@ fi
 for tool in qemu-system-x86_64 qemu-img ssh scp; do
   command -v "$tool" >/dev/null 2>&1 || infra "$tool is not installed"
 done
-[ -f "$VM_DISK" ] || infra "VM disk not found: $VM_DISK (provision it first; see README.md)"
-[ -r "$VM_SSH_KEY" ] || infra "cannot read SSH key: $VM_SSH_KEY"
+[[ -f "$VM_DISK" ]] || infra "VM disk not found: $VM_DISK (provision it first; see README.md)"
+[[ -r "$VM_SSH_KEY" ]] || infra "cannot read SSH key: $VM_SSH_KEY"
 qemu-img snapshot -l "$VM_DISK" 2>/dev/null | grep -qw "$VM_SNAPSHOT" \
   || infra "snapshot '$VM_SNAPSHOT' not found on $VM_DISK"
 
@@ -218,12 +218,12 @@ qemu-system-x86_64 \
   || infra "qemu failed to start (see $ARTIFACTS/qemu.log)"
 
 QEMU_PID="$(cat "$ARTIFACTS/qemu.pid" 2>/dev/null || true)"
-[ -n "$QEMU_PID" ] || infra "qemu started but wrote no pidfile"
+[[ -n "$QEMU_PID" ]] || infra "qemu started but wrote no pidfile"
 
 say "waiting up to ${BOOT_TIMEOUT}s for guest SSH and an interactive session"
 deadline=$(( $(date +%s) + BOOT_TIMEOUT ))
 until guest_ssh "echo ready" >/dev/null 2>&1; do
-  [ "$(date +%s)" -lt "$deadline" ] || infra "guest SSH never came up within ${BOOT_TIMEOUT}s"
+  [[ "$(date +%s)" -lt "$deadline" ]] || infra "guest SSH never came up within ${BOOT_TIMEOUT}s"
   kill -0 "$QEMU_PID" 2>/dev/null || infra "the VM exited while booting (see $ARTIFACTS/qemu.log)"
   sleep 5
 done
@@ -252,7 +252,7 @@ runfile="$ARTIFACTS/run.env"
   echo "POWERPOINT_ACCEPTANCE_PPTX=$GUEST_WORKDIR/under-test.pptx"
   echo "POWERPOINT_ACCEPTANCE_ARTIFACTS=$GUEST_WORKDIR/artifacts"
   echo "POWERPOINT_ACCEPTANCE_REQUIRED=1"
-  [ -n "$SLIDES" ] && echo "POWERPOINT_ACCEPTANCE_SLIDES=$SLIDES"
+  [[ -n "$SLIDES" ]] && echo "POWERPOINT_ACCEPTANCE_SLIDES=$SLIDES"
 } > "$runfile"
 guest_scp "$runfile" "$SSH_TARGET:$GUEST_WORKDIR/run.env" \
   || infra "could not stage the run parameters"
@@ -270,7 +270,7 @@ while :; do
     ''|*[!0-9]*) : ;;
     *) break ;;
   esac
-  if [ "$(date +%s)" -ge "$deadline" ]; then
+  if [[ "$(date +%s)" -ge "$deadline" ]]; then
     say "guest test exceeded ${RUN_TIMEOUT}s"
     guest_scp -r "$SSH_TARGET:$GUEST_WORKDIR/artifacts" "$ARTIFACTS/guest" >/dev/null 2>&1 || true
     infra "the guest test did not finish; partial diagnostics in $ARTIFACTS/guest"
@@ -283,7 +283,7 @@ say "collecting diagnostics"
 guest_scp -r "$SSH_TARGET:$GUEST_WORKDIR/artifacts" "$ARTIFACTS/guest" >/dev/null 2>&1 \
   || say "WARNING: could not copy the guest's artifacts back"
 
-if [ "$guest_status" -eq 0 ]; then
+if [[ "$guest_status" -eq 0 ]]; then
   say "RESULT: PowerPoint ($VM_LABEL) opened the file and every assertion passed"
 else
   say "RESULT: the PowerPoint test RAN and FAILED (guest exit $guest_status)"

@@ -150,12 +150,15 @@ installed on a supported Windows, which is the cheaper way to get it.
 | --- | --- |
 | `scripts/powerpoint-acceptance.sh` | host: snapshot, boot, run, reset |
 | `run-tests.cmd` | guest: the scheduled task's entry point |
-| `conftest.py` | prerequisites and the skip/fail split |
+| `conftest.py` | pytest options and fixtures |
+| `prereq.py` | the skip/fail split, callable from any scope |
 | `runner.py` | parent: deadline, dialog polling, guaranteed cleanup |
 | `ppt_worker.py` | child: the COM calls that may block forever |
 | `dialog_guard.py` | reads another process's dialogs; kills only our PIDs |
+| `artifacts.py` | the one contained directory a run writes into |
 | `fixtures.py` | builds known-bad packages from a known-good one |
 | `pngcheck.py` | validates a slide export; stdlib, replaces Pillow |
+| `test_portable.py` | tests for the three modules above that need no Windows |
 
 Three rules in that code are load-bearing, not stylistic.
 
@@ -181,6 +184,31 @@ Screenshots are GDI through `pywin32`; `pngcheck.py` validates exports with
 the standard library, and does it *more* strictly than `Image.verify()`,
 which checks chunk CRCs but never decompresses the pixel data. A slide
 PowerPoint began writing and abandoned passed Pillow and fails this.
+
+## Testing the harness itself
+
+```bash
+make acceptance-test          # from the repo root; no Windows needed
+```
+
+27 tests over `fixtures`, `pngcheck` and `artifacts` — the three modules that
+decide whether a PowerPoint result means anything. If `fixtures` quietly
+stopped breaking the negative control, or `pngcheck` stopped rejecting a
+half-written export, the suite would go green while measuring nothing.
+
+They are hermetic: every input is built in-process, so there is no compiler,
+Chrome, PowerPoint or network involved. The Windows-only tests skip, and the
+target says so rather than printing an unqualified "ok".
+
+`make acceptance-test` **fails** when `uv` is absent rather than skipping —
+deliberately unlike `make export-selftest`, which `exit 0`s without
+LibreOffice and is the reason a broken package shipped looking checked.
+
+It is not in CI: this repo's pipeline has no Python tier, and its Sonar job is
+a pinned reusable Go workflow. That is also why `sonar-project.properties`
+excludes this directory from coverage — the scan ingests a Go profile only, so
+every Python line would read as uncovered however well tested. The properties
+file records both.
 
 ## The negative control
 

@@ -259,6 +259,16 @@ Four constraints in that code are load-bearing:
   when `POWERPOINT_ACCEPTANCE_REQUIRED` is set, which the VM orchestrator and
   the dispatched CI job both do. Declared as the `powerpoint_acceptance` flag.
 
+**The harness has its own tests.** `make acceptance-test` runs 27 hermetic
+tests over the three modules that decide whether a PowerPoint result means
+anything — `fixtures` (builds the known-bad packages), `pngcheck` (validates a
+slide export) and `artifacts` (contains every path a run writes). It fails
+rather than skips when `uv` is absent. It is not in CI: there is no Python
+tier here, which is also why `sonar-project.properties` excludes the directory
+from coverage — that scan ingests a Go profile only, so every Python line
+would read uncovered however well tested. Both facts are recorded in that
+file.
+
 A negative control (`[Content_Types].xml` stripped from the real artifact) must
 be rejected, or every pass in the file is void — the same reasoning as
 `check-selftest`. And a **diagnostic** rebuilds the original defect (all
@@ -681,6 +691,7 @@ make check             # render the example deck and measure it
 make check-selftest    # prove the checker still catches all eight rules
 make export-selftest   # prove the generated pptx actually opens (LibreOffice)
 make pptx-acceptance PROFILE=<n>  # ... and that real PowerPoint opens it
+make acceptance-test   # the PowerPoint harness's own portable tests
 make seo-selftest      # prove every required meta tag is emitted
 make seo-audit         # Lighthouse SEO score against the rendered deck
 make golden            # perceptual diff against the approved baseline (examples/golden/)
@@ -775,6 +786,7 @@ examples/themes/check-fixture/     deliberately broken theme, ditto
 examples/contract-fixture/         deliberately broken deck, for validate-selftest
 flags/flags.json                   declared points of variation (the quality gates)
 acceptance/powerpoint/             real-PowerPoint acceptance tests (opt-in)
+acceptance/powerpoint/artifacts.py one contained dir per run (path safety)
 scripts/powerpoint-acceptance.sh   host side: Windows VM lifecycle for the above
 ```
 

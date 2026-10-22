@@ -17,9 +17,10 @@ Two deliberate choices about alerts:
   silently fix a malformed package and hand back a working presentation, so
   the test would pass on exactly the files this harness exists to catch.
 
-Writes a JSON result to `--result` and a one-line stage marker to
-`--progress`, so the parent still learns where it got to if it has to be
-killed.
+It takes exactly two paths: the .pptx to open, and one artifacts directory.
+Everything it writes is a constant name under that directory, contained by
+`artifacts.Run` -- see that module for why the earlier flag-per-file shape was
+the wrong one.
 """
 
 from __future__ import annotations
@@ -30,6 +31,8 @@ import os
 import sys
 import traceback
 
+import artifacts
+
 # MsoTriState. Named here because the positional Open2007 call below is
 # unreadable otherwise, and late binding gives no help with argument names.
 MSO_TRUE = -1
@@ -39,7 +42,7 @@ EXPORT_FILTER = "PNG"
 EXPORT_SCALE = 2  # 2x the slide's point size, matching the PNG adapter
 
 
-def _write(path: str, payload: dict) -> None:
+def _write_json(path: str, payload: dict) -> None:
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2, sort_keys=True)
 
@@ -60,22 +63,127 @@ class _Progress:
         self._fh.close()
 
 
+def _open_presentation(app: object, pptx: str) -> object:
+    return app.Presentations.Open2007(
+        pptx,  # FileName
+        MSO_TRUE,  # ReadOnly
+        MSO_FALSE,  # Untitled
+        MSO_TRUE,  # WithWindow
+        MSO_FALSE,  # OpenAndRepair -- the whole point
+    )
+
+
+def _export_slides(pres: object, run: artifacts.Run, count: int) -> tuple[list[str], list[int]]:
+    width = int(float(pres.PageSetup.SlideWidth) * EXPORT_SCALE)
+    height = int(float(pres.PageSetup.SlideHeight) * EXPORT_SCALE)
+    os.makedirs(run.slides, exist_ok=True)
+    written = []
+    for index in range(1, count + 1):
+        out = run.slide(index)
+        pres.Slides(index).Export(out, EXPORT_FILTER, width, height)
+        written.append(out)
+    return written, [width, height]
+
+
+def _version(app: object) -> tuple[str | None, str | None]:
+    try:
+        version = str(app.Version)
+    except AttributeError:
+        version = None
+    try:
+        build = str(app.Build)
+    except AttributeError:
+        # Build is absent on some versions; Version alone still identifies it.
+        build = None
+    return version, build
+
+
+def _run(pptx: str, run: artifacts.Run, result: dict, progress: _Progress) -> None:
+    """The COM sequence. Mutates `result` as it goes; raises on any failure."""
+    import pythoncom
+    import win32com.client
+
+    import dialog_guard
+
+    pythoncom.CoInitialize()
+
+    # Record which POWERPNT processes exist *before* we ask for one, so the
+    # ones that appear are provably ours. Cleaning up by image name would
+    # kill a PowerPoint the person at the keyboard had open.
+    before = dialog_guard.powerpoint_pids()
+    result["stage"] = "dispatch"
+    progress("dispatch")
+
+    app = win32com.client.DispatchEx("PowerPoint.Application")
+    pres = None
+    try:
+        ours = sorted(dialog_guard.powerpoint_pids() - before)
+        # Written before the open, not after: once Open2007 blocks on a dialog
+        # this process never reaches another line, and the parent needs to know
+        # what to terminate.
+        _write_json(run.pids, {"pids": ours, "pre_existing": sorted(before)})
+        result["owned_pids"] = ours
+
+        app.Visible = MSO_TRUE
+        result["powerpoint_version"], result["powerpoint_build"] = _version(app)
+
+        result["stage"] = "open"
+        progress("open")
+        pres = _open_presentation(app, pptx)
+
+        result["stage"] = "count"
+        progress("count")
+        count = int(pres.Slides.Count)
+        result["slide_count"] = count
+
+        result["stage"] = "export"
+        progress("export")
+        result["exports"], result["export_size"] = _export_slides(pres, run, count)
+
+        result["stage"] = "close"
+        progress("close")
+        pres.Close()
+        pres = None
+        app.Quit()
+        app = None
+    finally:
+        # Best effort: the parent terminates anything still alive by PID, so a
+        # failure to close politely is not itself interesting.
+        for close in (
+            lambda: pres.Close() if pres is not None else None,
+            lambda: app.Quit() if app is not None else None,
+        ):
+            try:
+                close()
+            except Exception:  # noqa: BLE001 - teardown of an already-failed run
+                pass
+
+    result["ok"] = True
+    result["stage"] = "done"
+    progress("done")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--pptx", required=True)
-    ap.add_argument("--out-dir", required=True)
-    ap.add_argument("--result", required=True)
-    ap.add_argument("--progress", required=True)
-    ap.add_argument("--pid-file", required=True)
+    ap.add_argument("--pptx", required=True, help="the .pptx to open")
+    ap.add_argument(
+        "--artifacts-dir",
+        required=True,
+        help="the one directory this run writes into; every name below it is fixed",
+    )
     args = ap.parse_args()
 
-    os.makedirs(args.out_dir, exist_ok=True)
-    progress = _Progress(args.progress)
+    pptx = os.path.realpath(args.pptx)
+    if not os.path.isfile(pptx):
+        print("no such .pptx: %s" % pptx, file=sys.stderr)
+        return 2
 
+    run = artifacts.Run(args.artifacts_dir)
+    progress = _Progress(run.progress)
     result: dict = {
         "ok": False,
         "stage": "start",
-        "pptx": os.path.abspath(args.pptx),
+        "pptx": pptx,
         "slide_count": None,
         "exports": [],
         "powerpoint_version": None,
@@ -85,96 +193,21 @@ def main() -> int:
         "traceback": None,
     }
 
-    app = None
-    pres = None
     try:
-        import pythoncom  # noqa: PLC0415  (guest-only dependency)
-        import win32com.client  # noqa: PLC0415
-
-        import dialog_guard
-
-        pythoncom.CoInitialize()
-
-        # Record which POWERPNT processes exist *before* we ask for one, so the
-        # ones that appear are provably ours. Cleaning up by image name would
-        # kill a PowerPoint the person at the keyboard had open.
-        before = dialog_guard.powerpoint_pids()
-        result["stage"] = "dispatch"
-        progress("dispatch")
-
-        app = win32com.client.DispatchEx("PowerPoint.Application")
-
-        ours = sorted(dialog_guard.powerpoint_pids() - before)
-        # Written before the open, not after: once Open2007 blocks on a dialog
-        # this process never reaches another line, and the parent needs to know
-        # what to terminate.
-        _write(args.pid_file, {"pids": ours, "pre_existing": sorted(before)})
-        result["owned_pids"] = ours
-
-        app.Visible = MSO_TRUE
-        result["powerpoint_version"] = str(app.Version)
-        try:
-            result["powerpoint_build"] = str(app.Build)
-        except Exception:  # noqa: BLE001 - Build is absent on some versions
-            result["powerpoint_build"] = None
-
-        result["stage"] = "open"
-        progress("open")
-        pres = app.Presentations.Open2007(
-            os.path.abspath(args.pptx),  # FileName
-            MSO_TRUE,  # ReadOnly
-            MSO_FALSE,  # Untitled
-            MSO_TRUE,  # WithWindow
-            MSO_FALSE,  # OpenAndRepair -- the whole point
-        )
-
-        result["stage"] = "count"
-        progress("count")
-        count = int(pres.Slides.Count)
-        result["slide_count"] = count
-
-        width = int(float(pres.PageSetup.SlideWidth) * EXPORT_SCALE)
-        height = int(float(pres.PageSetup.SlideHeight) * EXPORT_SCALE)
-        result["export_size"] = [width, height]
-
-        result["stage"] = "export"
-        progress("export")
-        for index in range(1, count + 1):
-            out = os.path.join(args.out_dir, "slide-%03d.png" % index)
-            pres.Slides(index).Export(out, EXPORT_FILTER, width, height)
-            result["exports"].append(out)
-
-        result["stage"] = "close"
-        progress("close")
-        pres.Close()
-        pres = None
-        app.Quit()
-        app = None
-
-        result["ok"] = True
-        result["stage"] = "done"
-        progress("done")
+        _run(pptx, run, result, progress)
         return 0
-
-    except BaseException as exc:  # noqa: BLE001 - every failure is a result
+    except Exception as exc:
+        # Recorded, then re-raised rather than swallowed: the result file is
+        # what the parent reads for a verdict, and the traceback on stderr is
+        # what a human reads. Returning a tidy exit code here would hide the
+        # second one.
         result["error"] = str(exc)
         result["error_type"] = type(exc).__name__
         result["traceback"] = traceback.format_exc()
-        progress("error:" + result["stage"])
-        # Best-effort teardown. A failure here is not interesting -- the parent
-        # terminates anything still alive by PID regardless.
-        for close in (
-            lambda: pres.Close() if pres is not None else None,
-            lambda: app.Quit() if app is not None else None,
-        ):
-            try:
-                close()
-            except Exception:  # noqa: BLE001,S110
-                pass
-        return 1
-
+        progress("error:" + str(result["stage"]))
+        raise
     finally:
-        _write(args.result, result)
+        _write_json(run.result, result)
         progress.close()
 
 
