@@ -66,8 +66,10 @@ func allNative(n int) map[int]bool {
 func TestWordsAreGroupedIntoLinesTopToBottom(t *testing.T) {
 	pages := parse(t, bbox([]pptxcheck.Word{
 		// Deliberately out of order, and with the sub-point jitter real glyphs
-		// have on a shared baseline.
-		word(300, 100.4, 360, 112, "world"),
+		// have on a shared baseline. The gap between "hello" and "world" is a
+		// word space -- narrower than the line is tall, which is what keeps
+		// them one line rather than two columns.
+		word(186, 100.4, 246, 112, "world"),
 		word(100, 200, 160, 212, "second"),
 		word(100, 100, 180, 112, "hello"),
 	}))
@@ -83,6 +85,24 @@ func TestWordsAreGroupedIntoLinesTopToBottom(t *testing.T) {
 	}
 	if got := lines[1].Text(); got != "second" {
 		t.Errorf("second line = %q", got)
+	}
+}
+
+func TestTwoBlocksSharingABaselineAreSeparateLines(t *testing.T) {
+	// A two-column layout puts unrelated text on one baseline. Read as a
+	// single line it would carry both columns' words, and a collision rule
+	// comparing it against the next line would be comparing text that sits
+	// side by side.
+	pages := parse(t, bbox([]pptxcheck.Word{
+		word(100, 100, 180, 112, "left"),
+		word(600, 100, 700, 112, "right"),
+	}))
+	lines := pages[0].Lines
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want the gutter to separate the columns: %+v", len(lines), lines)
+	}
+	if lines[0].Text() != "left" || lines[1].Text() != "right" {
+		t.Errorf("lines = %q / %q, want one column each", lines[0].Text(), lines[1].Text())
 	}
 }
 
@@ -114,7 +134,7 @@ func TestEachRuleFires(t *testing.T) {
 		rule: pptxcheck.RuleOverlap,
 		pages: bbox([]pptxcheck.Word{
 			word(100, 240, 500, 282, "Otimização"),
-			word(100, 285, 300, 324, "Grêmio"),
+			word(100, 285, 300, 324, "Gestão"),
 			word(100, 298, 600, 316, "Aumento"),
 		}),
 	}, {
@@ -145,7 +165,7 @@ func TestEachRuleFires(t *testing.T) {
 	}} {
 		t.Run(tc.rule, func(t *testing.T) {
 			pages := parse(t, tc.pages)
-			got := pptxcheck.Check(pages, tc.d, allNative(len(pages)), pptxcheck.Options{})
+			got := pptxcheck.Check(pages, tc.d, allNative(len(pages)), pptxcheck.DefaultOptions()).Findings
 			if rules(got)[tc.rule] == 0 {
 				t.Errorf("%s did not fire; got %v", tc.rule, rules(got))
 				for _, f := range got {
@@ -162,8 +182,8 @@ func TestACleanSlideProducesNothing(t *testing.T) {
 		word(60, 120, 500, 140, "entre"),
 	}))
 	d := &deck.Deck{Slides: []deck.Slide{{Number: 1, Title: "Comparativo entre"}}}
-	if got := pptxcheck.Check(pages, d, allNative(1), pptxcheck.Options{}); len(got) > 0 {
-		for _, f := range got {
+	if got := pptxcheck.Check(pages, d, allNative(1), pptxcheck.DefaultOptions()); len(got.Findings) > 0 {
+		for _, f := range got.Findings {
 			t.Errorf("unexpected finding: %s", f)
 		}
 	}
@@ -179,14 +199,14 @@ func TestAdjacentLinesMayShareAFractionOfAPoint(t *testing.T) {
 		word(100, 100, 300, 118, "first"),
 		word(100, 117.4, 300, 135, "second"),
 	}))
-	if n := rules(pptxcheck.Check(pages, nil, allNative(1), pptxcheck.Options{}))[pptxcheck.RuleOverlap]; n != 0 {
+	if n := rules(pptxcheck.Check(pages, nil, allNative(1), pptxcheck.DefaultOptions()).Findings)[pptxcheck.RuleOverlap]; n != 0 {
 		t.Errorf("sub-point interpenetration reported as %d overlap(s)", n)
 	}
 }
 
 func TestAFullBleedWordMayTouchTheEdge(t *testing.T) {
 	pages := parse(t, bbox([]pptxcheck.Word{word(0, 0, 960, 20, "fullbleed")}))
-	if n := rules(pptxcheck.Check(pages, nil, allNative(1), pptxcheck.Options{}))[pptxcheck.RuleOutOfBounds]; n != 0 {
+	if n := rules(pptxcheck.Check(pages, nil, allNative(1), pptxcheck.DefaultOptions()).Findings)[pptxcheck.RuleOutOfBounds]; n != 0 {
 		t.Errorf("a word at the page edge reported as %d out-of-bounds", n)
 	}
 }
@@ -205,7 +225,7 @@ func TestLetterSpacedTextIsNotReportedMissing(t *testing.T) {
 		word(305, 100, 330, 112, "TO"),
 	}))
 	d := &deck.Deck{Slides: []deck.Slide{{Number: 1, Kicker: "Proposta de projeto"}}}
-	if n := rules(pptxcheck.Check(pages, d, allNative(1), pptxcheck.Options{}))[pptxcheck.RuleMissingText]; n != 0 {
+	if n := rules(pptxcheck.Check(pages, d, allNative(1), pptxcheck.DefaultOptions()).Findings)[pptxcheck.RuleMissingText]; n != 0 {
 		t.Errorf("letter-spaced text reported as %d missing-text finding(s)", n)
 	}
 }
@@ -216,7 +236,7 @@ func TestAnImageModeSlideIsExemptFromMissingText(t *testing.T) {
 	// cannot judge.
 	pages := parse(t, bbox(nil))
 	d := &deck.Deck{Slides: []deck.Slide{{Number: 1, Title: "Comparativo entre clubes"}}}
-	if n := rules(pptxcheck.Check(pages, d, map[int]bool{1: false}, pptxcheck.Options{}))[pptxcheck.RuleMissingText]; n != 0 {
+	if n := rules(pptxcheck.Check(pages, d, map[int]bool{1: false}, pptxcheck.DefaultOptions()).Findings)[pptxcheck.RuleMissingText]; n != 0 {
 		t.Errorf("an image-mode slide reported %d missing-text finding(s)", n)
 	}
 }
@@ -236,8 +256,38 @@ func TestMissingTextToleratesTheOddWord(t *testing.T) {
 		Fields: map[string]any{"items": append(toAny(present), "kilo")},
 	}}}
 	pages := parse(t, bbox(words))
-	if n := rules(pptxcheck.Check(pages, d, allNative(1), pptxcheck.Options{}))[pptxcheck.RuleMissingText]; n != 0 {
+	if n := rules(pptxcheck.Check(pages, d, allNative(1), pptxcheck.DefaultOptions()).Findings)[pptxcheck.RuleMissingText]; n != 0 {
 		t.Errorf("1 missing word of 11 reported as a finding (%d)", n)
+	}
+}
+
+func TestColumnsThatMerelyStaggerAreNotACollision(t *testing.T) {
+	// Two columns, vertically staggered, sharing no horizontal extent. They
+	// interpenetrate on the y axis and overlap not at all on the page. Before
+	// the rule required horizontal extent as well, this was reported as 5pt of
+	// one drawing over the other -- a false positive on every split and
+	// columns layout in the library.
+	pages := parse(t, bbox([]pptxcheck.Word{
+		word(10, 100, 200, 120, "esquerda"),
+		word(600, 115, 800, 135, "direita"),
+	}))
+	got := pptxcheck.Check(pages, nil, allNative(1), pptxcheck.DefaultOptions())
+	if n := rules(got.Findings)[pptxcheck.RuleOverlap]; n != 0 {
+		t.Errorf("side-by-side columns reported as %d overlap(s): %v", n, got.Findings)
+	}
+}
+
+func TestAWordInsideALongerWordIsStillMissing(t *testing.T) {
+	// The letter-spacing fallback collapses a tracked line to one run of
+	// letters and looks for the expected word inside it. Applied to ordinary
+	// prose that accepts "rede" as rendered because "parede" contains it,
+	// which would blind the only rule here that notices a field never
+	// reaching a shape.
+	d := &deck.Deck{Slides: []deck.Slide{{Number: 1, Title: "rede"}}}
+	pages := parse(t, bbox([]pptxcheck.Word{word(100, 100, 200, 112, "parede")}))
+	got := pptxcheck.Check(pages, d, allNative(1), pptxcheck.DefaultOptions())
+	if n := rules(got.Findings)[pptxcheck.RuleMissingText]; n == 0 {
+		t.Error(`"rede" was declared and only "parede" rendered, which is a missing word`)
 	}
 }
 
@@ -257,7 +307,7 @@ func TestRunSurfacesAReaderThatWillNotOpenTheFile(t *testing.T) {
 	run := func(_ context.Context, name string, _ ...string) ([]byte, error) {
 		return nil, nil
 	}
-	_, err := pptxcheck.Run(context.Background(), run, "deck.pptx", nil, pptxcheck.Options{})
+	_, err := pptxcheck.Run(context.Background(), run, "deck.pptx", nil, pptxcheck.DefaultOptions())
 	if err == nil {
 		t.Fatal("want an error when the reader produces no PDF")
 	}
@@ -270,24 +320,82 @@ func TestRunSurfacesAConversionFailure(t *testing.T) {
 	run := func(_ context.Context, name string, _ ...string) ([]byte, error) {
 		return nil, errors.New("soffice exploded")
 	}
-	if _, err := pptxcheck.Run(context.Background(), run, "deck.pptx", nil, pptxcheck.Options{}); err == nil {
+	if _, err := pptxcheck.Run(context.Background(), run, "deck.pptx", nil, pptxcheck.DefaultOptions()); err == nil {
 		t.Fatal("want an error when the reader fails")
 	}
 }
 
+func TestAnExplicitZeroToleranceIsHonoured(t *testing.T) {
+	// Zero is the strictest setting the package offers, not an absent one.
+	// While Check substituted a default for any zero field, a caller asking to
+	// report every interpenetration silently got the 1pt default instead.
+	pages := parse(t, bbox([]pptxcheck.Word{
+		word(10, 100, 100, 120, "cima"),
+		word(10, 119.5, 100, 140, "baixo"),
+	}))
+	strict := pptxcheck.DefaultOptions()
+	strict.OverlapTolerancePt = 0
+	if n := rules(pptxcheck.Check(pages, nil, allNative(1), strict).Findings)[pptxcheck.RuleOverlap]; n == 0 {
+		t.Error("a half-point overlap went unreported at zero tolerance")
+	}
+	// And the default still forgives it, so the two settings really do differ.
+	if n := rules(pptxcheck.Check(pages, nil, allNative(1), pptxcheck.DefaultOptions()).Findings)[pptxcheck.RuleOverlap]; n != 0 {
+		t.Errorf("the default tolerance reported %d sub-point overlap(s)", n)
+	}
+}
+
+func TestReportNamesTheRulesThatCouldNotRun(t *testing.T) {
+	// "ok" from a run where the strongest rule never executed is the failure
+	// this package exists to correct. Without a deck there is nothing to
+	// compare the rendered words against, and the report has to say so.
+	pages := parse(t, bbox([]pptxcheck.Word{word(100, 100, 200, 112, "algo")}))
+	got := pptxcheck.Report(pptxcheck.Check(pages, nil, allNative(1), pptxcheck.DefaultOptions()))
+	if !strings.Contains(got, "ok") {
+		t.Errorf("Report should still say the measured rules found nothing: %q", got)
+	}
+	for _, want := range []string{pptxcheck.RuleMissingText, pptxcheck.RuleSlideCount, "did not run"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Report is missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestImageModeSlidesAreReportedAsUnjudged(t *testing.T) {
+	// The exemption is correct and it is also a gap in coverage. A deck where
+	// a third of the slides are flat pictures has a third of its text
+	// unchecked, and the report is the only place that can say so.
+	pages := parse(t, bbox(nil, nil))
+	d := &deck.Deck{Slides: []deck.Slide{{Number: 1, Title: "Primeiro"}, {Number: 2, Title: "Segundo"}}}
+	got := pptxcheck.Report(pptxcheck.Check(pages, d, map[int]bool{1: true}, pptxcheck.DefaultOptions()))
+	if !strings.Contains(got, "1 of 2 slides are image mode") {
+		t.Errorf("Report does not say which slides went unjudged:\n%s", got)
+	}
+}
+
+func TestResultCountsTheSlidesItMeasured(t *testing.T) {
+	// The page count comes from the rendered file. Taking it from the deck
+	// meant a run without -deck-root reported "across 0 slides" having just
+	// measured three.
+	pages := parse(t, bbox(nil, nil, nil))
+	got := pptxcheck.Check(pages, nil, nil, pptxcheck.DefaultOptions())
+	if got.Slides != 3 {
+		t.Errorf("Slides = %d, want the 3 pages that were measured", got.Slides)
+	}
+}
+
 func TestReportSaysSoWhenThereIsNothingToSay(t *testing.T) {
-	got := pptxcheck.Report(nil, 34)
+	got := pptxcheck.Report(pptxcheck.Result{Slides: 34})
 	if !strings.Contains(got, "ok") || !strings.Contains(got, "34") {
 		t.Errorf("Report = %q", got)
 	}
 }
 
 func TestReportGroupsByRule(t *testing.T) {
-	got := pptxcheck.Report([]pptxcheck.Finding{
+	got := pptxcheck.Report(pptxcheck.Result{Slides: 34, Findings: []pptxcheck.Finding{
 		{Slide: 1, Rule: pptxcheck.RuleOverlap, Detail: "a over b"},
 		{Slide: 3, Rule: pptxcheck.RuleOverlap, Detail: "c over d"},
 		{Slide: 7, Rule: pptxcheck.RuleTinyType, Detail: "6pt"},
-	}, 34)
+	}})
 	for _, want := range []string{"slide 1", "slide 7", "pptx-overlap=2", "pptx-tiny-type=1", "3 finding(s)"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Report is missing %q:\n%s", want, got)
@@ -332,22 +440,25 @@ func TestRunConvertsExtractsAndMeasures(t *testing.T) {
 		case "pdftotext":
 			return bbox([]pptxcheck.Word{
 				word(100, 240, 500, 282, "Otimização"),
-				word(100, 285, 300, 324, "Grêmio"),
+				word(100, 285, 300, 324, "Gestão"),
 				word(100, 298, 600, 316, "Aumento"),
 			}), nil
 		}
 		return nil, fmt.Errorf("unexpected command %q", name)
 	}
 
-	findings, err := pptxcheck.Run(context.Background(), run, writeMinimalPPTX(t, true), nil, pptxcheck.Options{})
+	result, err := pptxcheck.Run(context.Background(), run, writeMinimalPPTX(t, true), nil, pptxcheck.DefaultOptions())
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(called) != 2 || called[0] != "soffice" || called[1] != "pdftotext" {
 		t.Errorf("commands = %v, want soffice then pdftotext", called)
 	}
-	if rules(findings)[pptxcheck.RuleOverlap] == 0 {
-		t.Errorf("the overlap in the faked render was not reported: %v", rules(findings))
+	if rules(result.Findings)[pptxcheck.RuleOverlap] == 0 {
+		t.Errorf("the overlap in the faked render was not reported: %v", rules(result.Findings))
+	}
+	if result.Slides != len(result.Findings) && result.Slides == 0 {
+		t.Error("Run reported no slides measured")
 	}
 }
 

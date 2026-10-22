@@ -33,7 +33,7 @@ func TestExpectedWordsCollectsChromeBodyAndFields(t *testing.T) {
 
 func TestExpectedWordsExcludesNonVisualFields(t *testing.T) {
 	s := deck.Slide{
-		Badge: "assets/badge_gremio.png",
+		Badge: "assets/badge_acme.png",
 		Notes: "Remember to mention the quarterly numbers here",
 		Fields: map[string]any{
 			"alt":   "A chart showing quarterly growth",
@@ -46,7 +46,7 @@ func TestExpectedWordsExcludesNonVisualFields(t *testing.T) {
 		},
 	}
 	got := words(t, s)
-	for _, forbidden := range []string{"chart", "showing", "quarterly", "growth", "secretive", "codename", "badge", "gremio", "generated", "python"} {
+	for _, forbidden := range []string{"chart", "showing", "quarterly", "growth", "secretive", "codename", "badge", "acme", "generated", "python"} {
 		if got[forbidden] {
 			t.Errorf("ExpectedWords leaked non-visual content %q into %v", forbidden, got)
 		}

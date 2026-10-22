@@ -106,20 +106,23 @@ type Options struct {
 	MissingWordTolerance float64
 }
 
-func (o Options) withDefaults() Options {
-	if o.OverlapTolerancePt == 0 {
-		o.OverlapTolerancePt = DefaultOverlapTolerancePt
+// DefaultOptions is the tuned starting point. Adjust what you mean to adjust
+// and leave the rest:
+//
+//	opts := pptxcheck.DefaultOptions()
+//	opts.OverlapTolerancePt = 0 // report any interpenetration at all
+//
+// Check deliberately does NOT substitute defaults for zero fields. Zero is a
+// meaningful setting for every threshold here -- "tolerate nothing" for the
+// two tolerances, "do not run" for the type floor -- so a struct that quietly
+// rewrote a zero could not express the strictest setting it offers.
+func DefaultOptions() Options {
+	return Options{
+		OverlapTolerancePt:   DefaultOverlapTolerancePt,
+		MinTypePt:            DefaultMinTypePt,
+		EdgeTolerancePt:      DefaultEdgeTolerancePt,
+		MissingWordTolerance: DefaultMissingWordTolerance,
 	}
-	if o.MinTypePt == 0 {
-		o.MinTypePt = DefaultMinTypePt
-	}
-	if o.EdgeTolerancePt == 0 {
-		o.EdgeTolerancePt = DefaultEdgeTolerancePt
-	}
-	if o.MissingWordTolerance == 0 {
-		o.MissingWordTolerance = DefaultMissingWordTolerance
-	}
-	return o
 }
 
 // ── the measurement ─────────────────────────────────────────────────────────
@@ -130,8 +133,13 @@ type Word struct {
 	Text           string
 }
 
-// Line is a run of words sharing a baseline.
+// Line is a run of words sharing a baseline, within one horizontal band.
+//
+// The horizontal extent is carried because a collision rule needs it: two
+// lines can interpenetrate vertically and still sit side by side in separate
+// columns, which is not text drawn over text.
 type Line struct {
+	X0, X1 float64
 	Y0, Y1 float64
 	Words  []string
 }
@@ -145,10 +153,21 @@ type Page struct {
 	Lines         []Line
 }
 
-// lineBandPt is how far two words' tops may differ and still be one line.
-// Smaller than any plausible leading, larger than the sub-point jitter of
-// glyphs with different ascents on the same baseline.
-const lineBandPt = 4.0
+const (
+	// lineBandPt is how far two words' tops may differ and still be one line.
+	// Smaller than any plausible leading, larger than the sub-point jitter of
+	// glyphs with different ascents on the same baseline.
+	lineBandPt = 4.0
+
+	// columnGapFactor is how wide a horizontal gap must be, relative to the
+	// line's own height, before it reads as a gutter rather than a word space.
+	// A word space is a fraction of the type size and the line box is a little
+	// larger than the type size, so a gap wider than the line is tall is
+	// already far too wide to be a space. Two text blocks that merely share a
+	// baseline have to become two lines, or a collision rule comparing them
+	// would be comparing text that sits side by side.
+	columnGapFactor = 1.0
+)
 
 // pdfBBox is pdftotext -bbox's output.
 type pdfBBox struct {
@@ -190,6 +209,11 @@ func ParseBBox(raw []byte) ([]Page, error) {
 }
 
 // groupLines gathers words into lines, top to bottom.
+//
+// Two passes: words are banded by their top edge, then each band is cut
+// wherever the gap to the next word is too wide to be a word space. The result
+// is ordered by top edge, which is the invariant checkOverlap's early exit
+// rests on.
 func groupLines(words []Word) []Line {
 	sorted := make([]Word, len(words))
 	copy(sorted, words)
@@ -201,71 +225,179 @@ func groupLines(words []Word) []Line {
 	})
 
 	var lines []Line
+	var band []Word
 	for _, w := range sorted {
-		if n := len(lines); n > 0 && math.Abs(lines[n-1].Y0-w.Y0) < lineBandPt {
-			lines[n-1].Y1 = math.Max(lines[n-1].Y1, w.Y1)
-			lines[n-1].Words = append(lines[n-1].Words, w.Text)
-			continue
+		if len(band) > 0 && math.Abs(band[0].Y0-w.Y0) >= lineBandPt {
+			lines = append(lines, splitColumns(band)...)
+			band = band[:0:0]
 		}
-		lines = append(lines, Line{Y0: w.Y0, Y1: w.Y1, Words: []string{w.Text}})
+		band = append(band, w)
 	}
+	lines = append(lines, splitColumns(band)...)
+
+	sort.SliceStable(lines, func(i, j int) bool {
+		if lines[i].Y0 != lines[j].Y0 {
+			return lines[i].Y0 < lines[j].Y0
+		}
+		return lines[i].X0 < lines[j].X0
+	})
 	return lines
 }
 
+// splitColumns breaks one horizontal band into lines, cutting at every gap too
+// wide to be a word space.
+//
+// Y0 stays the leading word's top rather than the band's minimum: the overlap
+// tolerance is calibrated against that reading, and within a band the two
+// differ by less than lineBandPt anyway.
+func splitColumns(band []Word) []Line {
+	if len(band) == 0 {
+		return nil
+	}
+	start := func(w Word) Line {
+		return Line{X0: w.X0, X1: w.X1, Y0: w.Y0, Y1: w.Y1, Words: []string{w.Text}}
+	}
+	var out []Line
+	cur := start(band[0])
+	for _, w := range band[1:] {
+		if w.X0-cur.X1 > (cur.Y1-cur.Y0)*columnGapFactor {
+			out = append(out, cur)
+			cur = start(w)
+			continue
+		}
+		cur.X1 = math.Max(cur.X1, w.X1)
+		cur.Y1 = math.Max(cur.Y1, w.Y1)
+		cur.Words = append(cur.Words, w.Text)
+	}
+	return append(out, cur)
+}
+
 // ── the rules ───────────────────────────────────────────────────────────────
+
+// Result is what Check measured and, just as important, what it could not.
+//
+// Skipped is not decoration. A report that says "ok" without saying which
+// rules were able to run is precisely the failure this package was written to
+// correct, one level down: the strongest rule here does nothing without a deck
+// to compare against, and silence from a rule that never ran looks exactly
+// like silence from a rule that found nothing.
+type Result struct {
+	// Slides is how many slides were measured -- the rendered file's own page
+	// count, not what the deck claims.
+	Slides   int
+	Findings []Finding
+	Skipped  []Skip
+}
+
+// Skip records a rule that did not run, on some or all slides, and why.
+type Skip struct {
+	Rule   string
+	Reason string
+}
 
 // Check measures already-rendered pages against the deck that produced them.
 //
 // Separated from Run so the rules are testable without LibreOffice: every
 // rule here is a pure function of pages, the deck and the set of native
 // slides.
-func Check(pages []Page, d *deck.Deck, native map[int]bool, opts Options) []Finding {
-	opts = opts.withDefaults()
-	var out []Finding
+func Check(pages []Page, d *deck.Deck, native map[int]bool, opts Options) Result {
+	res := Result{Slides: len(pages)}
 
 	if d != nil && len(pages) != len(d.Slides) {
-		out = append(out, Finding{Rule: RuleSlideCount,
+		res.Findings = append(res.Findings, Finding{Rule: RuleSlideCount,
 			Detail: fmt.Sprintf("the rendered file has %d slides, the deck declares %d",
 				len(pages), len(d.Slides))})
 	}
+	res.Skipped = skipped(pages, d, native, opts)
 
 	for i, page := range pages {
 		n := i + 1
-		out = append(out, checkOverlap(n, page, opts)...)
-		out = append(out, checkBounds(n, page, opts)...)
-		out = append(out, checkTinyType(n, page, opts)...)
+		res.Findings = append(res.Findings, checkOverlap(n, page, opts)...)
+		res.Findings = append(res.Findings, checkBounds(n, page, opts)...)
+		res.Findings = append(res.Findings, checkTinyType(n, page, opts)...)
 		if d != nil {
-			out = append(out, checkMissingText(n, page, d, native, opts)...)
+			res.Findings = append(res.Findings, checkMissingText(n, page, d, native, opts)...)
 		}
 	}
 
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Slide != out[j].Slide {
-			return out[i].Slide < out[j].Slide
+	sort.SliceStable(res.Findings, func(i, j int) bool {
+		if res.Findings[i].Slide != res.Findings[j].Slide {
+			return res.Findings[i].Slide < res.Findings[j].Slide
 		}
-		return out[i].Rule < out[j].Rule
+		return res.Findings[i].Rule < res.Findings[j].Rule
 	})
+	return res
+}
+
+// skipped surveys which rules could not run, so Report can say so rather than
+// printing the same "ok" a genuinely clean deck earns.
+func skipped(pages []Page, d *deck.Deck, native map[int]bool, opts Options) []Skip {
+	var out []Skip
+	if d == nil {
+		return append(out,
+			Skip{RuleSlideCount, "no deck was supplied, so there is nothing to compare the page count against"},
+			Skip{RuleMissingText, "no deck was supplied, so there is nothing to compare the rendered words against"})
+	}
+	if opts.MinTypePt <= 0 {
+		out = append(out, Skip{RuleTinyType, "the type floor is set to zero, which disables the rule"})
+	}
+	var unsized, flat int
+	for i, page := range pages {
+		if page.Width <= 0 || page.Height <= 0 {
+			unsized++
+		}
+		if !native[i+1] {
+			flat++
+		}
+	}
+	if unsized > 0 {
+		out = append(out, Skip{RuleOutOfBounds, fmt.Sprintf(
+			"%d of %d slides report no page size, so nothing can be judged against their edges", unsized, len(pages))})
+	}
+	if flat > 0 {
+		out = append(out, Skip{RuleMissingText, fmt.Sprintf(
+			"%d of %d slides are image mode, where a flat picture carries no extractable text", flat, len(pages))})
+	}
 	return out
 }
 
 // checkOverlap is the rule the cover defect needed.
 //
-// Consecutive lines only: a non-consecutive pair cannot interpenetrate without
-// the pair between them doing so first, and comparing every pair would report
-// the same collision three times.
+// Two conditions, and both are necessary: the lines must interpenetrate
+// vertically AND share horizontal extent. Vertical interpenetration on its own
+// is not a collision -- two columns side by side routinely stagger, and
+// reading that as text drawn over text would fire on every split and columns
+// layout in the library. A rule that cries wolf gets switched off, which is
+// worse than not having written it.
+//
+// Each line is compared against every following line whose top still falls
+// inside its box, rather than only the next one: once a band is cut into
+// columns the immediately following line may sit in a different column while
+// the one after it collides. The walk stops at the first line that starts
+// below this one, which groupLines' ordering guarantees is also past every
+// line after it.
 func checkOverlap(n int, page Page, opts Options) []Finding {
 	var out []Finding
-	for i := 0; i+1 < len(page.Lines); i++ {
-		upper, lower := page.Lines[i], page.Lines[i+1]
-		by := upper.Y1 - lower.Y0
-		if by > opts.OverlapTolerancePt {
+	for i, upper := range page.Lines {
+		for _, lower := range page.Lines[i+1:] {
+			by := upper.Y1 - lower.Y0
+			if by <= opts.OverlapTolerancePt {
+				break
+			}
+			if !sharesColumn(upper, lower) {
+				continue
+			}
 			out = append(out, Finding{Slide: n, Rule: RuleOverlap,
-				Detail: fmt.Sprintf("%.1fpt of overlap: %q draws over %q",
+				Detail: fmt.Sprintf("%.1f points of overlap: %q draws over %q",
 					by, truncate(upper.Text(), 40), truncate(lower.Text(), 40))})
 		}
 	}
 	return out
 }
+
+// sharesColumn reports whether two lines share any horizontal extent, which is
+// what separates text drawn over text from two columns that merely stagger.
+func sharesColumn(a, b Line) bool { return a.X0 < b.X1 && b.X0 < a.X1 }
 
 // checkBounds catches text the reader pushed off the slide.
 //
@@ -281,7 +413,7 @@ func checkBounds(n int, page Page, opts Options) []Finding {
 		switch {
 		case w.X0 < -t, w.Y0 < -t, w.X1 > page.Width+t, w.Y1 > page.Height+t:
 			out = append(out, Finding{Slide: n, Rule: RuleOutOfBounds,
-				Detail: fmt.Sprintf("%q sits at (%.0f,%.0f)-(%.0f,%.0f) outside the %.0fx%.0fpt slide",
+				Detail: fmt.Sprintf("%q sits at (%.0f,%.0f)-(%.0f,%.0f), outside the %.0fx%.0f point slide",
 					truncate(w.Text, 30), w.X0, w.Y0, w.X1, w.Y1, page.Width, page.Height)})
 		}
 	}
@@ -303,7 +435,7 @@ func checkTinyType(n int, page Page, opts Options) []Finding {
 	}
 	if worstLine != "" {
 		out = append(out, Finding{Slide: n, Rule: RuleTinyType,
-			Detail: fmt.Sprintf("a line measures %.1fpt tall, below the %.1fpt floor: %q — "+
+			Detail: fmt.Sprintf("a line measures %.1f points tall, below the %.1f point floor: %q — "+
 				"autofit may have shrunk it to fit", worst, opts.MinTypePt, truncate(worstLine, 40))})
 	}
 	return out
@@ -344,13 +476,18 @@ func checkMissingText(n int, page Page, d *deck.Deck, native map[int]bool, opts 
 	// Letter-spaced type defeats word matching. A PDF extractor reads the gaps
 	// between tracked glyphs as word breaks, so a kicker set in tracked
 	// capitals arrives as "PROPO STA DE PROJ E TO" and every word in it looks
-	// absent. Collapsing each line to a single run of letters and asking
-	// whether the expected word appears in it recovers those without
-	// weakening the rule: a word found inside a line's own letters, in order,
-	// did render.
-	runs := make([]string, 0, len(page.Lines))
+	// absent. Collapsing such a line to one run of letters and asking whether
+	// the expected word appears inside it recovers those.
+	//
+	// Only such a line. Applied to every line the fallback would accept any
+	// expected word that happens to sit inside a longer one -- "rede" inside
+	// "parede" -- and quietly weaken the only rule here that notices a field
+	// failing to reach a shape at all.
+	var runs []string
 	for _, l := range page.Lines {
-		runs = append(runs, strings.ReplaceAll(parity.Fold(l.Text()), " ", ""))
+		if looksLetterSpaced(l) {
+			runs = append(runs, strings.ReplaceAll(parity.Fold(l.Text()), " ", ""))
+		}
 	}
 	rendered := func(w string) bool {
 		if got[w] {
@@ -382,6 +519,32 @@ func checkMissingText(n int, page Page, d *deck.Deck, native map[int]bool, opts 
 		Detail: fmt.Sprintf("%d of %d declared words did not reach the slide (%.0f%%): %s",
 			len(missing), len(expected), ratio*100, truncate(strings.Join(missing, " "), 60))}}
 }
+
+// looksLetterSpaced reports whether a line's words look like the fragments an
+// extractor makes of tracked type rather than real words.
+//
+// Tracked capitals arrive as many short pieces, because the extractor reads
+// the gaps between tracked glyphs as word breaks. Prose does not look like
+// that: Portuguese and English both average well above three letters a word.
+func looksLetterSpaced(l Line) bool {
+	if len(l.Words) < minFragmentsForTracking {
+		return false
+	}
+	letters := 0
+	for _, w := range l.Words {
+		letters += len([]rune(w))
+	}
+	return float64(letters)/float64(len(l.Words)) <= maxMeanFragmentLen
+}
+
+const (
+	// Two short words are just two short words; tracking fragments a line into
+	// several pieces.
+	minFragmentsForTracking = 3
+
+	// Mean fragment length at or below this is tracking, not prose.
+	maxMeanFragmentLen = 3.0
+)
 
 func truncate(s string, n int) string {
 	if len(s) <= n {
@@ -428,23 +591,23 @@ func NativeSlides(pptxPath string) (map[int]bool, error) {
 }
 
 // Run renders pptxPath and measures it.
-func Run(ctx context.Context, run Runner, pptxPath string, d *deck.Deck, opts Options) ([]Finding, error) {
+func Run(ctx context.Context, run Runner, pptxPath string, d *deck.Deck, opts Options) (Result, error) {
 	work, err := os.MkdirTemp("", "pptxcheck-*")
 	if err != nil {
-		return nil, fmt.Errorf("pptxcheck: temp dir: %w", err)
+		return Result{}, fmt.Errorf("pptxcheck: temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(work) }()
 
 	if _, err := run(ctx, "soffice", "--headless", "--norestore",
 		"-env:UserInstallation=file://"+filepath.Join(work, "profile"),
 		"--convert-to", "pdf", "--outdir", work, pptxPath); err != nil {
-		return nil, fmt.Errorf("pptxcheck: convert %s: %w", pptxPath, err)
+		return Result{}, fmt.Errorf("pptxcheck: convert %s: %w", pptxPath, err)
 	}
 
 	pdf := ""
 	entries, err := os.ReadDir(work)
 	if err != nil {
-		return nil, fmt.Errorf("pptxcheck: read %s: %w", work, err)
+		return Result{}, fmt.Errorf("pptxcheck: read %s: %w", work, err)
 	}
 	for _, e := range entries {
 		if strings.HasSuffix(e.Name(), ".pdf") {
@@ -454,47 +617,56 @@ func Run(ctx context.Context, run Runner, pptxPath string, d *deck.Deck, opts Op
 	}
 	if pdf == "" {
 		// The reader declining the file is itself the finding, and a loud one.
-		return nil, fmt.Errorf("pptxcheck: the reader produced no PDF from %s, so it could not open it", pptxPath)
+		return Result{}, fmt.Errorf("pptxcheck: the reader produced no PDF from %s, so it could not open it", pptxPath)
 	}
 
 	raw, err := run(ctx, "pdftotext", "-bbox", pdf, "-")
 	if err != nil {
-		return nil, fmt.Errorf("pptxcheck: extract word boxes: %w", err)
+		return Result{}, fmt.Errorf("pptxcheck: extract word boxes: %w", err)
 	}
 	pages, err := ParseBBox(raw)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 
 	native, err := NativeSlides(pptxPath)
 	if err != nil {
-		return nil, err
+		return Result{}, err
 	}
 	return Check(pages, d, native, opts), nil
 }
 
-// Report renders findings for a human, grouped by slide.
-func Report(findings []Finding, slides int) string {
-	if len(findings) == 0 {
-		return fmt.Sprintf("pptx-check: ok — no measured defects across %d slides\n", slides)
-	}
+// Report renders a result for a human: the findings, then a tally, then what
+// could not be measured.
+//
+// The skips print whether or not anything was found. "ok" with a rule missing
+// from the run is a different statement from "ok" with every rule applied, and
+// the reader of a build log has no other way to tell them apart.
+func Report(r Result) string {
 	var b strings.Builder
-	for _, f := range findings {
+	for _, f := range r.Findings {
 		fmt.Fprintf(&b, "%s\n", f)
 	}
-	rules := map[string]int{}
-	for _, f := range findings {
-		rules[f.Rule]++
+	if len(r.Findings) == 0 {
+		fmt.Fprintf(&b, "pptx-check: ok — no measured defects across %d slide(s)\n", r.Slides)
+	} else {
+		counts := map[string]int{}
+		for _, f := range r.Findings {
+			counts[f.Rule]++
+		}
+		names := make([]string, 0, len(counts))
+		for name := range counts {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		fmt.Fprintf(&b, "\npptx-check: %d finding(s) across %d rule(s):", len(r.Findings), len(names))
+		for _, name := range names {
+			fmt.Fprintf(&b, " %s=%d", name, counts[name])
+		}
+		b.WriteByte('\n')
 	}
-	names := make([]string, 0, len(rules))
-	for r := range rules {
-		names = append(names, r)
+	for _, sk := range r.Skipped {
+		fmt.Fprintf(&b, "pptx-check: %s did not run — %s\n", sk.Rule, sk.Reason)
 	}
-	sort.Strings(names)
-	fmt.Fprintf(&b, "\npptx-check: %d finding(s) across %d rule(s):", len(findings), len(names))
-	for _, r := range names {
-		fmt.Fprintf(&b, " %s=%d", r, rules[r])
-	}
-	b.WriteByte('\n')
 	return b.String()
 }

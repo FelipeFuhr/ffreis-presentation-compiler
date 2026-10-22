@@ -526,6 +526,14 @@ The container invariants are therefore not delegated to it. They are held by
 repo that is stricter than every reader available.
 
 ## PowerPoint acceptance (`acceptance/powerpoint/`)
+
+The only check here that asks **real desktop Microsoft PowerPoint** whether it
+will open what this compiler wrote. It exists because the zip-version bug above
+was accepted by every reader this repo could reach — `zipfile`, `unzip -t`,
+python-pptx, LibreOffice, current PowerPoint — and refused by the desktop
+PowerPoint the file was sent to. There was no reader in the toolchain strict
+enough to disagree, so a whole class of packaging defect could ship.
+
 **Two runtimes, and the blocker is neither of them.** A profile picks
 `RUNTIME=container` (dockur/windows under podman, which downloads its own
 Windows media) or `RUNTIME=qemu` (a VM you provisioned and snapshotted).
@@ -538,21 +546,13 @@ sits on a volume at 83% full against a Windows install of tens of gigabytes.
 **`make acceptance-selftest` is the part that does run here.** 32 assertions
 over the orchestrator with `podman`, `ssh`, `scp` and qemu faked — scripts
 that log every call and answer as a guest would. It exists because the
-orchestrator was the one piece exercising which needed the very thing that is
-missing, leaving its exit codes unverified; and those are the worst thing to
-get wrong, being the difference between "PowerPoint refused the file" and "we
-never asked PowerPoint". It found a real bug on first run: dispatch written
+orchestrator was the one piece whose own exercise needed the very thing that
+is missing, which left its exit codes unverified — and those are the worst
+thing to get wrong, being the difference between "PowerPoint refused the file"
+and "we never asked PowerPoint". It found a real bug on first run: dispatch written
 `[[ $RUNTIME == qemu ]] && qemu_alive || container_alive` runs the third
 branch whenever the second is false, so a dead VM made the orchestrator ask
 the container whether it was running.
-
-
-The only check here that asks **real desktop Microsoft PowerPoint** whether it
-will open what this compiler wrote. It exists because the zip-version bug above
-was accepted by every reader this repo could reach — `zipfile`, `unzip -t`,
-python-pptx, LibreOffice, current PowerPoint — and refused by the desktop
-PowerPoint the file was sent to. There was no reader in the toolchain strict
-enough to disagree, so a whole class of packaging defect could ship.
 
 It is Python, in an otherwise-Go repo, because `pywin32` is the only practical
 way to drive PowerPoint's COM API. `make pptx-acceptance PROFILE=<name>` runs

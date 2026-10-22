@@ -137,10 +137,14 @@ func patchHeaders(t *testing.T, raw []byte, fn func(buf []byte, cd, local int)) 
 	return buf
 }
 
+// rules tallies findings by rule name, and records which rules this suite has
+// been seen to produce. TestMain in rules_test.go turns that record into a
+// gate: a rule no fixture fires fails the package.
 func rules(findings []pptx.Finding) map[string]int {
 	out := map[string]int{}
 	for _, f := range findings {
 		out[f.Rule]++
+		observed[f.Rule] = true
 	}
 	return out
 }

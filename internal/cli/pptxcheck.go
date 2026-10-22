@@ -75,23 +75,22 @@ func runPPTXCheck(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	findings, err := pptxcheck.Run(context.Background(), pptxRunner, opts.pptx, d, pptxcheck.Options{
-		OverlapTolerancePt:   opts.overlap,
-		MinTypePt:            opts.minType,
-		EdgeTolerancePt:      opts.edge,
-		MissingWordTolerance: opts.tolerance,
-	})
+	// Built from DefaultOptions rather than a bare literal so a threshold
+	// added to the package later arrives tuned here instead of zeroed.
+	tuned := pptxcheck.DefaultOptions()
+	tuned.OverlapTolerancePt = opts.overlap
+	tuned.MinTypePt = opts.minType
+	tuned.EdgeTolerancePt = opts.edge
+	tuned.MissingWordTolerance = opts.tolerance
+
+	result, err := pptxcheck.Run(context.Background(), pptxRunner, opts.pptx, d, tuned)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "pptx-check: %v\n", err)
 		return exitError
 	}
 
-	slides := 0
-	if d != nil {
-		slides = len(d.Slides)
-	}
-	_, _ = fmt.Fprint(stdout, pptxcheck.Report(findings, slides))
-	if len(findings) > 0 {
+	_, _ = fmt.Fprint(stdout, pptxcheck.Report(result))
+	if len(result.Findings) > 0 {
 		return exitError
 	}
 	return exitOK

@@ -68,6 +68,37 @@ const (
 	RuleTextAutofit        = "text-autofit"
 )
 
+// Rules is every rule Verify can report.
+//
+// It exists so the test suite can assert two things it otherwise could not:
+// that this list has not drifted from the constants above, and that each rule
+// in it actually fired somewhere in the suite. A rule nobody has a fixture for
+// is a rule nobody knows still works -- and a verifier that quietly stopped
+// checking looks exactly like a package with nothing wrong, which is the
+// failure mode this whole file exists to prevent.
+func Rules() []string {
+	return []string{
+		RuleContentTypesFirst,
+		RuleZipVersion,
+		RuleDataDescriptor,
+		RuleZipSizes,
+		RuleZipModDate,
+		RuleEntryName,
+		RuleEntryCount,
+		RuleEncrypted,
+		RuleContentType,
+		RuleXMLWellFormed,
+		RuleRelationshipTarget,
+		RuleRelationshipID,
+		RuleSlideIDList,
+		RuleThemePerMaster,
+		RuleSlideSize,
+		RuleMediaIntegrity,
+		RuleFontEmbedding,
+		RuleTextAutofit,
+	}
+}
+
 // Namespaces. Declared once; the attribute scan below compares against them.
 const (
 	nsRelationships = "http://schemas.openxmlformats.org/package/2006/relationships"
