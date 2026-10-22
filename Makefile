@@ -43,7 +43,8 @@ MUTATION_THRESHOLD ?= 60
 	install build doctor smoke-check check check-selftest export-selftest \
 	validate-deck validate-selftest \
 	seo-selftest seo-audit \
-	golden golden-update review metrics
+	golden golden-update review metrics \
+	pptx-acceptance acceptance-test
 
 ## mutation: run mutation testing with gremlins (slow — CI only)
 mutation:
@@ -411,3 +412,56 @@ review: ## Extract layout metrics and get a model's advisory critique (never blo
 	&& echo "review: critique above is advisory only — it never fails the build" \
 	|| echo "review: modelctl did not return a critique (see output above, if any) — no critique obtained, this is not a pass"; \
 	exit 0
+
+# ── PowerPoint acceptance (optional; needs a provisioned Windows VM) ─────────
+#
+# The only check in this repo that asks desktop Microsoft PowerPoint whether it
+# will open what we wrote. Everything else -- pptx_test.go's byte assertions,
+# export-selftest's LibreOffice round-trip, python-pptx -- is a lenient reader,
+# and a file all of them accepted was still refused by a real PowerPoint.
+#
+# Needs a licensed Windows + Office VM that cannot live in this repo, so this is
+# never part of quality-gates or CI. See acceptance/powerpoint/README.md.
+PPT_ACCEPT_OUT ?= .bin/powerpoint
+ACCEPTANCE_DIR ?= acceptance/powerpoint
+# Kept in step with acceptance/powerpoint/requirements.txt by hand: there is
+# no Python dependency resolver in this repo to derive it from.
+ACCEPTANCE_PYTEST ?= 9.0.3
+PROFILE ?=
+PPTX    ?=
+SLIDES  ?=
+
+acceptance-test: ## Run the PowerPoint harness's own portable tests (no Windows needed)
+	@command -v uv >/dev/null 2>&1 || { \
+		echo "acceptance-test: uv is not installed -- this target FAILS rather than" >&2; \
+		echo "  skipping, because a skip that reads as a pass is how a gate stops gating." >&2; \
+		exit 1; \
+	}
+	@cd $(ACCEPTANCE_DIR) && uv run --no-project --with "pytest==$(ACCEPTANCE_PYTEST)" -- \
+		python -m pytest -q -p no:cacheprovider
+	@echo "acceptance-test: ok -- the Windows-only tests skipped, as they must off-Windows"
+
+pptx-acceptance: ## Open the built pptx in real PowerPoint in a VM: make pptx-acceptance PROFILE=<name>
+	@[ -n "$(PROFILE)" ] || { \
+		echo "usage: make pptx-acceptance PROFILE=<name> [PPTX=<file>] [SLIDES=<n>]" >&2; \
+		echo "       profiles live in acceptance/powerpoint/profiles/<name>.env" >&2; \
+		ls -1 acceptance/powerpoint/profiles/*.env 2>/dev/null | sed 's/^/       have: /' >&2; \
+		exit 2; \
+	}
+	@set -euo pipefail; \
+	pptx="$(PPTX)"; slides="$(SLIDES)"; \
+	if [ -z "$$pptx" ]; then \
+		rm -rf "$(PPT_ACCEPT_OUT)/build" && mkdir -p "$(PPT_ACCEPT_OUT)/build"; \
+		go run ./cmd/$(BINARY) build -deck-root "$(EXAMPLE_DECK)" \
+			-theme-root "$(EXAMPLE_THEMES)" -out "$(PPT_ACCEPT_OUT)/build" \
+			-formats html,pptx >/dev/null; \
+		pptx="$(PPT_ACCEPT_OUT)/build/$$(basename $(EXAMPLE_DECK)).pptx"; \
+		test -s "$$pptx" || { echo "pptx-acceptance: no pptx produced" >&2; exit 3; }; \
+		if [ -z "$$slides" ]; then \
+			slides="$$(grep -c '<section' "$(PPT_ACCEPT_OUT)/build/index.html")"; \
+		fi; \
+	fi; \
+	args="--profile $(PROFILE) --pptx $$pptx --artifacts $(PPT_ACCEPT_OUT)/$(PROFILE)"; \
+	if [ -n "$$slides" ]; then args="$$args --slides $$slides"; fi; \
+	echo "pptx-acceptance: $$pptx (slides: $${slides:-not asserted}) -> profile $(PROFILE)"; \
+	exec ./scripts/powerpoint-acceptance.sh $$args

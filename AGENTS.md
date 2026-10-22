@@ -218,7 +218,70 @@ is what caught the data-descriptor bug. **It would not have caught the other
 two** — LibreOffice accepts both a zero date and a zero version — and it is
 local-only: no workflow runs it, and it `exit 0`s when `soffice` is absent, so
 its silence means nothing. Treat it as one lenient reader's opinion, not as
-proof the file opens.
+proof the file opens. The reader whose opinion actually matters is the one
+below.
+
+## PowerPoint acceptance (`acceptance/powerpoint/`)
+
+The only check here that asks **real desktop Microsoft PowerPoint** whether it
+will open what this compiler wrote. It exists because the zip-version bug above
+was accepted by every reader this repo could reach — `zipfile`, `unzip -t`,
+python-pptx, LibreOffice, current PowerPoint — and refused by the desktop
+PowerPoint the file was sent to. There was no reader in the toolchain strict
+enough to disagree, so a whole class of packaging defect could ship.
+
+It is Python, in an otherwise-Go repo, because `pywin32` is the only practical
+way to drive PowerPoint's COM API. `make pptx-acceptance PROFILE=<name>` runs
+it in a disposable Windows VM under QEMU/KVM; `acceptance/powerpoint/README.md`
+carries the provisioning steps and the full design.
+
+**It has never been executed against a real PowerPoint.** No licensed Windows
+or Office image exists here yet. Nothing in this repo may be called
+PowerPoint-verified until one does — that is the entire discipline this harness
+is for, so do not soften it.
+
+Four constraints in that code are load-bearing:
+
+- **`OpenAndRepair=msoFalse`, and the dialog is never answered.** Repair
+  silently fixes a malformed package and hands back a working presentation, so
+  a test that allowed it would pass on exactly the files this exists to catch.
+  A dialog that appears anyway is read for its text and reported.
+- **The COM calls run in a child process.** A modal dialog parks the calling
+  thread inside `Open2007` until a button is pressed, so the process that
+  opened the file cannot be the one that notices. `runner.py` owns the deadline
+  and polls for dialogs from outside; `ppt_worker.py` writes its PID file
+  *before* opening, because after that it may never reach another line.
+- **Only our own PowerPoint is terminated**, identified by diffing the running
+  `POWERPNT.EXE` set across our own `DispatchEx` — never by image name. The
+  harness refuses to start at all while another PowerPoint is open rather than
+  risk driving someone's window.
+- **A skip is not a pass.** Absent prerequisites skip by default and *fail*
+  when `POWERPOINT_ACCEPTANCE_REQUIRED` is set, which the VM orchestrator and
+  the dispatched CI job both do. Declared as the `powerpoint_acceptance` flag.
+
+**The harness has its own tests.** `make acceptance-test` runs 27 hermetic
+tests over the three modules that decide whether a PowerPoint result means
+anything — `fixtures` (builds the known-bad packages), `pngcheck` (validates a
+slide export) and `artifacts` (contains every path a run writes). It fails
+rather than skips when `uv` is absent. It is not in CI: there is no Python
+tier here, which is also why `sonar-project.properties` excludes the directory
+from coverage — that scan ingests a Go profile only, so every Python line
+would read uncovered however well tested. Both facts are recorded in that
+file.
+
+A negative control (`[Content_Types].xml` stripped from the real artifact) must
+be rejected, or every pass in the file is void — the same reasoning as
+`check-selftest`. And a **diagnostic** rebuilds the original defect (all
+version fields back to `0.0`, every part otherwise byte-identical) and records
+whether this PowerPoint rejects it, without asserting: the field is advisory,
+so the answer describes the installed PowerPoint, not the compiler. Run across
+profiles it is what turns "a reader could not open it" into "PowerPoint *x.y*
+rejects this field".
+
+No automatic trigger and no default runner label: GitHub's hosted windows
+runners ship no Office and have no interactive desktop, and no runner in this
+fleet carries a licensed PowerPoint. A job queueing forever against a label
+nobody serves looks like a gate while gating nothing.
 
 ## SEO (`internal/seo`)
 
@@ -626,7 +689,9 @@ make validate-selftest # prove the validator still catches all seven rules
 make smoke-check       # end-to-end render + pagination assertion
 make check             # render the example deck and measure it
 make check-selftest    # prove the checker still catches all eight rules
-make export-selftest   # prove the generated pptx actually opens
+make export-selftest   # prove the generated pptx actually opens (LibreOffice)
+make pptx-acceptance PROFILE=<n>  # ... and that real PowerPoint opens it
+make acceptance-test   # the PowerPoint harness's own portable tests
 make seo-selftest      # prove every required meta tag is emitted
 make seo-audit         # Lighthouse SEO score against the rendered deck
 make golden            # perceptual diff against the approved baseline (examples/golden/)
@@ -720,6 +785,9 @@ examples/check-fixture/            deliberately broken deck, for check-selftest
 examples/themes/check-fixture/     deliberately broken theme, ditto
 examples/contract-fixture/         deliberately broken deck, for validate-selftest
 flags/flags.json                   declared points of variation (the quality gates)
+acceptance/powerpoint/             real-PowerPoint acceptance tests (opt-in)
+acceptance/powerpoint/artifacts.py one contained dir per run (path safety)
+scripts/powerpoint-acceptance.sh   host side: Windows VM lifecycle for the above
 ```
 
 ## Roadmap
@@ -730,7 +798,10 @@ the generator hook (python, cmd, mermaid, d2), CSV-sourced table rows
 surface, `serve`, `doctor`, five self-tests, golden images
 (`golden`/`golden-update`), OCR content parity (`parity`), and model-assisted
 review (`metrics`/`review`).
-Next: nothing queued — this list is empty.
+Also implemented, but never yet run for real: the PowerPoint acceptance
+harness (`acceptance/powerpoint/`).
+Next: provision one Windows+Office VM so that harness stops being theory,
+ideally two — the current PowerPoint and the older one that refused a file.
 
 ## Keeping this file current
 
