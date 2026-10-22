@@ -490,3 +490,143 @@ func TestVerifyReportsASlideListedButMissing(t *testing.T) {
 		t.Errorf("want a slide-id-list finding for a listed-but-absent slide, got %v", rules(findings))
 	}
 }
+
+// ── the remaining rules, each proven rather than asserted ───────────────────
+
+// mutate returns the package with one part's body rewritten by fn.
+func mutate(t *testing.T, raw []byte, name string, fn func(string) string) []byte {
+	t.Helper()
+	parts := explode(t, raw)
+	found := false
+	for i := range parts {
+		if parts[i].name == name {
+			parts[i].body = []byte(fn(string(parts[i].body)))
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no such part to mutate: %s", name)
+	}
+	return rezip(t, parts)
+}
+
+func TestVerifyRejectsAnUnusableEntryName(t *testing.T) {
+	good := goodPackage(t)
+	for _, tc := range []struct{ label, name string }{
+		{"backslash", `ppt\slides\slide1.xml`},
+		{"absolute", "/ppt/slides/slide1.xml"},
+		{"traversal", "ppt/slides/../../../etc/passwd"},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			parts := explode(t, good)
+			for i := range parts {
+				if parts[i].name == "ppt/slides/slide1.xml" {
+					parts[i].name = tc.name
+				}
+			}
+			findings := verifyBytes(t, rezip(t, parts))
+			if rules(findings)[pptx.RuleEntryName] == 0 {
+				t.Errorf("%s name produced no entry-name finding; got %v", tc.label, rules(findings))
+			}
+		})
+	}
+}
+
+func TestVerifyRejectsAnEmptyPackage(t *testing.T) {
+	var buf bytes.Buffer
+	z := zip.NewWriter(&buf)
+	if err := z.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	findings := verifyBytes(t, buf.Bytes())
+	if rules(findings)[pptx.RuleEntryCount] == 0 {
+		t.Errorf("want an entry-count finding for a package with no entries, got %v", rules(findings))
+	}
+}
+
+func TestVerifyRejectsAWrongContentType(t *testing.T) {
+	// Not merely missing -- present and wrong. A reader dispatching on content
+	// type would not know it is looking at a slide.
+	raw := mutate(t, goodPackage(t), "[Content_Types].xml", func(s string) string {
+		return strings.Replace(s,
+			`PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"`,
+			`PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"`,
+			1)
+	})
+	findings := verifyBytes(t, raw)
+	if rules(findings)[pptx.RuleContentType] == 0 {
+		t.Errorf("want a content-type finding for a part typed as the wrong thing, got %v", rules(findings))
+	}
+}
+
+func TestVerifyRejectsAPartWithNoDefaultAndNoOverride(t *testing.T) {
+	parts := append(explode(t, goodPackage(t)), namedPart{"ppt/embeddings/oleObject1.bin", []byte("payload")})
+	findings := verifyBytes(t, rezip(t, parts))
+	if rules(findings)[pptx.RuleContentType] == 0 {
+		t.Errorf("want a content-type finding for an untypeable extension, got %v", rules(findings))
+	}
+}
+
+func TestVerifyReportsAMalformedContentTypeMap(t *testing.T) {
+	raw := mutate(t, goodPackage(t), "[Content_Types].xml", func(s string) string { return s[:len(s)/2] })
+	findings := verifyBytes(t, raw)
+	if rules(findings)[pptx.RuleContentType] == 0 {
+		t.Errorf("want a content-type finding for an unparseable map, got %v", rules(findings))
+	}
+}
+
+func TestVerifyReportsAMalformedPresentationPart(t *testing.T) {
+	raw := mutate(t, goodPackage(t), "ppt/presentation.xml", func(s string) string {
+		return strings.Replace(s, "</p:presentation>", "", 1)
+	})
+	findings := verifyBytes(t, raw)
+	if rules(findings)[pptx.RuleXMLWellFormed] == 0 {
+		t.Errorf("want an xml-well-formed finding, got %v", rules(findings))
+	}
+}
+
+func TestVerifyRejectsABadSlideIDList(t *testing.T) {
+	good := goodPackage(t)
+	for _, tc := range []struct {
+		label string
+		from  string
+		to    string
+	}{
+		{"duplicate id", `<p:sldId id="257" r:id="rId3"/>`, `<p:sldId id="256" r:id="rId3"/>`},
+		{"id below the floor", `<p:sldId id="256"`, `<p:sldId id="12"`},
+		{"id above the ceiling", `<p:sldId id="256"`, `<p:sldId id="2147483648"`},
+		{"dangling relationship", `r:id="rId2"/>`, `r:id="rIdMissing"/>`},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			raw := mutate(t, good, "ppt/presentation.xml", func(s string) string {
+				out := strings.Replace(s, tc.from, tc.to, 1)
+				if out == s {
+					t.Fatalf("fixture did not apply: %q not found", tc.from)
+				}
+				return out
+			})
+			findings := verifyBytes(t, raw)
+			if rules(findings)[pptx.RuleSlideIDList] == 0 {
+				t.Errorf("%s produced no slide-id-list finding; got %v", tc.label, rules(findings))
+			}
+		})
+	}
+}
+
+func TestVerifyIgnoresAnExternalRelationshipTarget(t *testing.T) {
+	// An External target names a URL, not a part, so resolving it against the
+	// package would report every hyperlink as missing.
+	raw := mutate(t, goodPackage(t), "ppt/slides/_rels/slide1.xml.rels", func(s string) string {
+		return strings.Replace(s, "</Relationships>",
+			`<Relationship Id="rIdLink" `+
+				`Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" `+
+				`Target="https://example.invalid/" TargetMode="External"/></Relationships>`, 1)
+	})
+	findings := verifyBytes(t, raw)
+	if n := rules(findings)[pptx.RuleRelationshipTarget]; n != 0 {
+		t.Errorf("an External target was reported as missing (%d finding(s))", n)
+		for _, f := range findings {
+			t.Logf("  %s", f)
+		}
+	}
+}
