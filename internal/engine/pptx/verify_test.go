@@ -571,7 +571,7 @@ func TestVerifyReportsAMalformedContentTypeMap(t *testing.T) {
 	raw := mutate(t, goodPackage(t), "[Content_Types].xml", func(s string) string { return s[:len(s)/2] })
 	findings := verifyBytes(t, raw)
 	if rules(findings)[pptx.RuleContentType] == 0 {
-		t.Errorf("want a content-type finding for an unparseable map, got %v", rules(findings))
+		t.Errorf("want a content-type finding for an unparsable map, got %v", rules(findings))
 	}
 }
 
