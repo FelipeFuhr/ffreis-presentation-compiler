@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html/template"
 	"os"
 	"path/filepath"
 	"strings"
@@ -403,25 +402,6 @@ func TestReportGroupsByRule(t *testing.T) {
 	}
 }
 
-// ── the deck model's plain-text body ────────────────────────────────────────
-
-func TestBodyTextKeepsParagraphsAndDropsMarkup(t *testing.T) {
-	s := deck.Slide{Body: template.HTML(
-		"<p>Durante a <em>elaboração</em> dos mapeamentos,\n coleta de dados.</p>\n" +
-			"<p>Parte da meta é alcan&ccedil;ada.</p>")}
-	got := s.BodyText()
-	want := "Durante a elaboração dos mapeamentos, coleta de dados.\nParte da meta é alcançada."
-	if got != want {
-		t.Errorf("BodyText() =\n%q\nwant\n%q", got, want)
-	}
-}
-
-func TestBodyTextIsEmptyForNoBody(t *testing.T) {
-	if got := (deck.Slide{}).BodyText(); got != "" {
-		t.Errorf("BodyText() = %q, want empty", got)
-	}
-}
-
 func TestRunConvertsExtractsAndMeasures(t *testing.T) {
 	// The fake reader writes a PDF where it was told to, so Run's whole
 	// sequence -- convert, find the output, extract, parse, measure -- is
@@ -433,7 +413,7 @@ func TestRunConvertsExtractsAndMeasures(t *testing.T) {
 		case "soffice":
 			for i, a := range args {
 				if a == "--outdir" && i+1 < len(args) {
-					return nil, os.WriteFile(filepath.Join(args[i+1], "deck.pdf"), []byte("%PDF-1.4"), 0o600)
+					return nil, os.WriteFile(filepath.Join(args[i+1], "deck.pdf"), []byte("not read"), 0o600)
 				}
 			}
 			return nil, errors.New("the fake reader was not told where to write")

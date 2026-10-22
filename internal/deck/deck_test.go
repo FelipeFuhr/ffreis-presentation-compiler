@@ -1,6 +1,7 @@
 package deck_test
 
 import (
+	"html/template"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,5 +203,39 @@ func TestSizeResolvesAspect(t *testing.T) {
 				t.Errorf("got %vx%v, want %vx7.5", size.WidthIn, size.HeightIn, tc.wantW)
 			}
 		})
+	}
+}
+
+// ── BodyText ────────────────────────────────────────────────────────────────
+
+// BodyText exists because Body reaches a template as rendered HTML, and a
+// PPTX text box needs characters. These live here rather than beside the
+// consumer that needed them: the behaviour is the deck model's.
+
+func TestBodyTextKeepsParagraphsAndDropsMarkup(t *testing.T) {
+	s := deck.Slide{Body: template.HTML(
+		"<p>Durante a <em>elaboração</em> dos mapeamentos,\n coleta de dados.</p>\n" +
+			"<p>Parte da meta é alcan&ccedil;ada.</p>")}
+	got := s.BodyText()
+	want := "Durante a elaboração dos mapeamentos, coleta de dados.\nParte da meta é alcançada."
+	if got != want {
+		t.Errorf("BodyText() =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestBodyTextTreatsASoftWrapAsASpace(t *testing.T) {
+	// Markdown wraps prose at the source line, and only a block boundary is a
+	// paragraph break. Breaking on every newline turned one sentence into
+	// several paragraphs, each of which the exporter then set as its own
+	// paragraph in the slide.
+	s := deck.Slide{Body: template.HTML("<p>uma linha\nque continua\nna seguinte</p>")}
+	if got := s.BodyText(); got != "uma linha que continua na seguinte" {
+		t.Errorf("BodyText() = %q, want one paragraph", got)
+	}
+}
+
+func TestBodyTextIsEmptyForNoBody(t *testing.T) {
+	if got := (deck.Slide{}).BodyText(); got != "" {
+		t.Errorf("BodyText() = %q, want empty", got)
 	}
 }
