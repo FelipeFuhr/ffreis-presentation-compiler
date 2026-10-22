@@ -34,6 +34,8 @@ func run(program string, args []string, stdout, stderr io.Writer) int {
 		return runBuild(args[1:], stdout, stderr)
 	case "validate":
 		return runValidate(args[1:], stdout, stderr)
+	case "pptx-check":
+		return runPPTXCheck(args[1:], stdout, stderr)
 	case "check":
 		return runCheck(args[1:], stdout, stderr)
 	case "golden":
@@ -63,6 +65,7 @@ usage:
   %s build     -deck-root <dir> -theme-root <dir> [-out dist] [-formats html,pdf]
   %s validate  -deck-root <dir> -theme-root <dir>
   %s check     [-dir dist] [-theme-root <dir> -theme <name>] [-pdf <file>]
+  %s pptx-check -pptx <file.pptx> [-deck-root <dir>]
   %s golden    -dir <rendered-slides-dir> [-baseline examples/golden] [-tolerance 0.01]
   %s parity    -deck-root <dir> -dir <rendered-slides-dir> [-lang por] [-tolerance 0.12]
   %s metrics   [-dir dist] [-out metrics.json]
@@ -74,10 +77,12 @@ commands:
   validate  check a deck against its theme's field contract before rendering
   check     measure a rendered deck: overflow, out-of-bounds, tiny-type,
             contrast, missing-asset, font-fallback, overlap, pdf-pages
+  pptx-check render an exported .pptx and measure where the text landed:
+            overlap, out-of-bounds, tiny-type, missing-text, slide-count
   golden    compare freshly rendered slide PNG files against an approved baseline
   parity    OCR rendered slide PNG files and report words missing from the source
   metrics   extract per-slide layout metrics (box geometry, density, palette…)
   serve     render, serve over loopback HTTP, and reload on source changes
   doctor    report which render adapters are available on this machine
-`, program, program, program, program, program, program, program, program, program)
+`, program, program, program, program, program, program, program, program, program, program)
 }

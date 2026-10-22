@@ -13,7 +13,7 @@ import (
 //
 // The motivating bug: Portuguese and Spanish write decimals with a comma
 // ("9,8 milhões"), and an unquoted YAML flow sequence splits on commas —
-// `[Grêmio, 9,8 milhões, 103,4 mil]` parses as five cells, not three, and
+// `[Clube Ômega, 9,8 milhões, 103,4 mil]` parses as five cells, not three, and
 // every value downstream lands under the wrong header. The table still fits
 // the slide and reads as plausible numbers, so nothing about its rendered
 // geometry looks wrong; only the content is.

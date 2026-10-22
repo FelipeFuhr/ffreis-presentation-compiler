@@ -49,6 +49,19 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 	}
 	_, _ = fmt.Fprintf(stdout, "%-9s %-21s %s\n", "parity", parity.Tool, parityStatus)
 
+	// ooxml-validate is Microsoft's own Open XML SDK behind a small .NET
+	// console app. Optional, like parity's tesseract: it catches a class
+	// nothing else here checks -- PresentationML schema conformance, with the
+	// offending part and XPath -- but it is NOT a substitute for PowerPoint.
+	// It accepts the exact package a desktop PowerPoint refused, because the
+	// container fields that defect lived in are advisory and .NET's own
+	// ZipArchive ignores them too.
+	ooxmlStatus := "ok"
+	if _, err := engine.LookPath("dotnet"); err != nil {
+		ooxmlStatus = "optional, not installed (see tools/ooxml-validate)"
+	}
+	_, _ = fmt.Fprintf(stdout, "%-9s %-21s %s\n", "ooxml", "dotnet", ooxmlStatus)
+
 	if !allReady {
 		_, _ = fmt.Fprintln(stdout, "\nhtml always works; install the tools above for the other formats.")
 		return exitError

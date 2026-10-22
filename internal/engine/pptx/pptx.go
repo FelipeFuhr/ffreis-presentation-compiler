@@ -34,11 +34,23 @@ const EMUPerInch = 914400
 
 // Slide is one page of the deck.
 type Slide struct {
-	// PNG is the rendered image; it fills the whole slide.
+	// PNG is the rendered image; it fills the whole slide. Used when Shapes is
+	// empty, which is image mode and also the per-slide fallback for a layout
+	// the theme has not described in PPTX terms.
 	PNG []byte
 	// Notes is the slide's text, preserved as speaker notes.
 	Notes string
+	// Shapes, when non-empty, makes this slide native: real text boxes,
+	// tables and pictures instead of one flat image. PNG is then ignored.
+	//
+	// This package deliberately knows nothing about layouts or themes -- it
+	// renders the shapes it is handed. Deciding which shapes a slide gets, or
+	// that it gets none and falls back to its image, belongs to the caller.
+	Shapes []Shape
 }
+
+// Native reports whether this slide is editable rather than a flat image.
+func (s Slide) Native() bool { return len(s.Shapes) > 0 }
 
 // Deck is what Write serialises.
 type Deck struct {
@@ -46,8 +58,15 @@ type Deck struct {
 	HeightIn float64
 	// Lang is the document's BCP 47 language tag, stamped on every speaker-notes
 	// run. Empty falls back to DefaultNotesLang.
-	Lang   string
-	Slides []Slide
+	Lang string
+	// Font is the typeface the theme's fontScheme declares. Empty falls back
+	// to DefaultFont, which is deliberately a font Office ships: OOXML has no
+	// fallback stack, so an absent typeface substitutes silently.
+	Font string
+	// EmbeddedFonts travel inside the package so the typeface cannot
+	// substitute. Optional, and see EmbeddedFont for what is proven.
+	EmbeddedFonts []EmbeddedFont
+	Slides        []Slide
 }
 
 // DefaultNotesLang is the language tag used when a deck names none. It only
@@ -133,11 +152,15 @@ type part struct {
 }
 
 func writeParts(z *zip.Writer, d Deck) error {
-	parts := []part{{name: "[Content_Types].xml", body: []byte(contentTypes(len(d.Slides)))}}
+	parts := []part{{name: "[Content_Types].xml",
+		body: []byte(contentTypes(len(d.Slides), len(d.EmbeddedFonts) > 0))}}
 
 	static := []struct{ name, src string }{
 		{"_rels/.rels", "assets/root.rels.xml"},
-		{"ppt/theme/theme1.xml", "assets/theme1.xml"},
+		// theme1.xml is read below rather than here: its fontScheme carries
+		// the deck's typeface, and the shipped asset used to hardcode one
+		// consumer's font -- the same leak as this package's old pt-BR notes
+		// default, in a compiler whose whole discipline is naming no consumer.
 		// The notes master gets its OWN theme part, from the same asset bytes.
 		//
 		// ECMA-376 allocates a theme "per Handout Master, Notes Master, Slide
@@ -154,10 +177,6 @@ func writeParts(z *zip.Writer, d Deck) error {
 		// presentation.xml.rels below still targets it. It is the notes master
 		// that needs its own.
 		//
-		// Same bytes rather than a second 7 KB asset: the requirement is a
-		// distinct part, not distinct content, and two near-identical assets
-		// would only drift.
-		{"ppt/theme/theme2.xml", "assets/theme1.xml"},
 		{"ppt/slideMasters/slideMaster1.xml", "assets/slideMaster1.xml"},
 		{"ppt/slideMasters/_rels/slideMaster1.xml.rels", "assets/slideMaster1.xml.rels"},
 		{"ppt/slideLayouts/slideLayout1.xml", "assets/slideLayout1.xml"},
@@ -181,17 +200,33 @@ func writeParts(z *zip.Writer, d Deck) error {
 		parts = append(parts, part{name: st.name, body: body})
 	}
 
+	theme, err := themeXML(d.Font)
+	if err != nil {
+		return err
+	}
 	parts = append(parts,
-		part{"ppt/presentation.xml", []byte(presentation(d))},
-		part{"ppt/_rels/presentation.xml.rels", []byte(presentationRels(len(d.Slides)))},
+		part{"ppt/theme/theme1.xml", theme},
+		// The notes master needs its own theme part; see the note above the
+		// slide master's relationships for why sharing one is refused.
+		part{"ppt/theme/theme2.xml", theme},
 	)
+
+	fontBodies, fontRels, fontList := fontParts(d.EmbeddedFonts, presRels{slides: len(d.Slides)}.firstFont())
+	parts = append(parts,
+		part{"ppt/presentation.xml", []byte(presentation(d, fontList))},
+		part{"ppt/_rels/presentation.xml.rels", []byte(presentationRels(len(d.Slides), fontRels))},
+	)
+	parts = append(parts, fontBodies...)
 
 	for i, s := range d.Slides {
 		n := i + 1
+		images := slideImages(s)
+		for j, body := range images {
+			parts = append(parts, part{mediaName(n, j, s.Native()), body})
+		}
 		parts = append(parts,
-			part{fmt.Sprintf("ppt/media/slide%d.png", n), s.PNG},
 			part{fmt.Sprintf("ppt/slides/slide%d.xml", n), []byte(slideXML(n, d))},
-			part{fmt.Sprintf("ppt/slides/_rels/slide%d.xml.rels", n), []byte(slideRels(n))},
+			part{fmt.Sprintf("ppt/slides/_rels/slide%d.xml.rels", n), []byte(slideRels(n, len(images), s.Native()))},
 			part{fmt.Sprintf("ppt/notesSlides/notesSlide%d.xml", n), []byte(notesXML(s.Notes, d.Lang))},
 			part{fmt.Sprintf("ppt/notesSlides/_rels/notesSlide%d.xml.rels", n), []byte(notesRels(n))},
 		)
@@ -303,14 +338,14 @@ func add(z *zip.Writer, name string, body []byte) error {
 	return nil
 }
 
-func contentTypes(slides int) string {
+func contentTypes(slides int, embedsFonts bool) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Default Extension="png" ContentType="image/png"/>
-  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+__FONT_DEFAULT__  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
   <Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>
   <Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>
   <Override PartName="/ppt/notesMasters/notesMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml"/>
@@ -327,47 +362,126 @@ func contentTypes(slides int) string {
 		fmt.Fprintf(&b, `  <Override PartName="/ppt/notesSlides/notesSlide%d.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>`+"\n", n)
 	}
 	b.WriteString("</Types>\n")
-	return b.String()
+
+	// Declared only when a font part exists. A Default for an extension no
+	// part uses is valid OPC but it is a claim about a package that is not
+	// true, and this file is read by people deciding what the package holds.
+	fontDefault := ""
+	if embedsFonts {
+		fontDefault = fmt.Sprintf("  <Default Extension=%q ContentType=%q/>\n", fontDataExt, fontContentType)
+	}
+	return strings.Replace(b.String(), "__FONT_DEFAULT__", fontDefault, 1)
 }
 
-func presentation(d Deck) string {
+// presRels names the relationships of ppt/presentation.xml.
+//
+// These were inline arithmetic (slides+2, slides+3, ...) in three places that
+// had to agree, and fonts needed a fourth. Naming them makes the agreement
+// checkable rather than remembered; Verify's relationship-id rule catches it
+// if they ever stop agreeing.
+type presRels struct{ slides int }
+
+func (p presRels) slideMaster() int { return 1 }
+func (p presRels) slide(n int) int  { return n + 1 }
+func (p presRels) notesMaster() int { return p.slides + 2 }
+func (p presRels) theme() int       { return p.slides + 3 }
+func (p presRels) presProps() int   { return p.slides + 4 }
+func (p presRels) viewProps() int   { return p.slides + 5 }
+func (p presRels) tableStyles() int { return p.slides + 6 }
+func (p presRels) firstFont() int   { return p.slides + 7 }
+
+func presentation(d Deck, fontList string) string {
+	r := presRels{slides: len(d.Slides)}
 	var ids strings.Builder
 	for n := 1; n <= len(d.Slides); n++ {
 		// Slide ids must be >= 256; rIds start after the master.
-		fmt.Fprintf(&ids, `<p:sldId id="%d" r:id="rId%d"/>`, 255+n, n+1)
+		fmt.Fprintf(&ids, `<p:sldId id="%d" r:id="rId%d"/>`, 255+n, r.slide(n))
 	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
                 xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
                 xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
-  <p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>
+  <p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId%d"/></p:sldMasterIdLst>
   <p:notesMasterIdLst><p:notesMasterId r:id="rId%d"/></p:notesMasterIdLst>
   <p:sldIdLst>%s</p:sldIdLst>
   <p:sldSz cx="%d" cy="%d"/>
-  <p:notesSz cx="%d" cy="%d"/>
+  <p:notesSz cx="%d" cy="%d"/>%s
 </p:presentation>
-`, len(d.Slides)+2, ids.String(), emu(d.WidthIn), emu(d.HeightIn), emu(d.HeightIn), emu(d.WidthIn))
+`, r.slideMaster(), r.notesMaster(), ids.String(),
+		emu(d.WidthIn), emu(d.HeightIn), emu(d.HeightIn), emu(d.WidthIn), fontList)
 }
 
-func presentationRels(slides int) string {
+func presentationRels(slides int, fontRels string) string {
+	r := presRels{slides: slides}
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>
 `)
+	fmt.Fprintf(&b, `  <Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>`+"\n", r.slideMaster())
 	for n := 1; n <= slides; n++ {
-		fmt.Fprintf(&b, `  <Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide%d.xml"/>`+"\n", n+1, n)
+		fmt.Fprintf(&b, `  <Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide%d.xml"/>`+"\n", r.slide(n), n)
 	}
-	fmt.Fprintf(&b, `  <Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Target="notesMasters/notesMaster1.xml"/>`+"\n", slides+2)
-	fmt.Fprintf(&b, `  <Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>`+"\n", slides+3)
-	fmt.Fprintf(&b, `  <Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/presProps" Target="presProps.xml"/>`+"\n", slides+4)
-	fmt.Fprintf(&b, `  <Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/viewProps" Target="viewProps.xml"/>`+"\n", slides+5)
-	fmt.Fprintf(&b, `  <Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/tableStyles" Target="tableStyles.xml"/>`+"\n", slides+6)
+	for _, fixed := range []struct {
+		id     int
+		typ    string
+		target string
+	}{
+		{r.notesMaster(), "notesMaster", "notesMasters/notesMaster1.xml"},
+		{r.theme(), "theme", "theme/theme1.xml"},
+		{r.presProps(), "presProps", "presProps.xml"},
+		{r.viewProps(), "viewProps", "viewProps.xml"},
+		{r.tableStyles(), "tableStyles", "tableStyles.xml"},
+	} {
+		fmt.Fprintf(&b, `  <Relationship Id="rId%d" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/%s" Target="%s"/>`+"\n",
+			fixed.id, fixed.typ, fixed.target)
+	}
+	b.WriteString(fontRels)
 	b.WriteString("</Relationships>\n")
 	return b.String()
 }
 
+// slideImages returns the image bodies this slide contributes, in the order
+// their relationships are assigned.
+func slideImages(s Slide) [][]byte {
+	if !s.Native() {
+		return [][]byte{s.PNG}
+	}
+	var out [][]byte
+	for _, sh := range s.Shapes {
+		if sh.Kind == ShapePicture {
+			out = append(out, sh.PNG)
+		}
+	}
+	return out
+}
+
+// mediaName keeps image mode's part names unchanged -- ppt/media/slideN.png --
+// while a native slide, which may carry several pictures or none, numbers them.
+func mediaName(slide, index int, native bool) string {
+	if !native {
+		return fmt.Sprintf("ppt/media/slide%d.png", slide)
+	}
+	return fmt.Sprintf("ppt/media/slide%d-%d.png", slide, index+1)
+}
+
+// Relationship ids within a slide. Images start after the fixed two so the
+// same convention serves a slide with one picture and a slide with six; a
+// dangling r:id is one of the things Verify checks, which is what makes a
+// single convention safe to rely on here.
+const (
+	relSlideLayout = "rId1"
+	relNotesSlide  = "rId2"
+	relFirstImage  = 3
+)
+
+func imageRelID(index int) string { return fmt.Sprintf("rId%d", relFirstImage+index) }
+
 func slideXML(n int, d Deck) string {
+	s := d.Slides[n-1]
+	body := fullBleedPicture(n, d)
+	if s.Native() {
+		body = shapeTree(s, d.Lang)
+	}
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
        xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -378,7 +492,17 @@ func slideXML(n int, d Deck) string {
       <p:grpSpPr>
         <a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>
           <a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm>
-      </p:grpSpPr>
+      </p:grpSpPr>%s
+    </p:spTree>
+  </p:cSld>
+  <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
+</p:sld>
+`, body)
+}
+
+// fullBleedPicture is image mode: the whole slide is one picture.
+func fullBleedPicture(n int, d Deck) string {
+	return fmt.Sprintf(`
       <p:pic>
         <p:nvPicPr>
           <p:cNvPr id="%d" name="Slide %d"/>
@@ -386,29 +510,59 @@ func slideXML(n int, d Deck) string {
           <p:nvPr/>
         </p:nvPicPr>
         <p:blipFill>
-          <a:blip r:embed="rId2"/>
+          <a:blip r:embed="%s"/>
           <a:stretch><a:fillRect/></a:stretch>
         </p:blipFill>
         <p:spPr>
           <a:xfrm><a:off x="0" y="0"/><a:ext cx="%d" cy="%d"/></a:xfrm>
           <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
         </p:spPr>
-      </p:pic>
-    </p:spTree>
-  </p:cSld>
-  <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
-</p:sld>
-`, n+1, n, emu(d.WidthIn), emu(d.HeightIn))
+      </p:pic>`, n+1, n, imageRelID(0), emu(d.WidthIn), emu(d.HeightIn))
 }
 
-func slideRels(n int) string {
-	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+// shapeTree is native mode. Shape ids start at 2 because the group shape that
+// wraps every slide tree is id 1.
+func shapeTree(s Slide, lang string) string {
+	var b strings.Builder
+	id := 2
+	picture := 0
+	for _, sh := range s.Shapes {
+		switch sh.Kind {
+		case ShapeText:
+			b.WriteString(textBoxXML(id, sh, lang))
+		case ShapeBullets:
+			b.WriteString(bulletsXML(id, sh, lang))
+		case ShapeTable:
+			b.WriteString(tableXML(id, sh, lang))
+		case ShapeRect:
+			b.WriteString(rectXML(id, sh))
+		case ShapePicture:
+			b.WriteString(pictureXML(id, sh, imageRelID(picture)))
+			picture++
+		default:
+			// An unknown kind is dropped rather than guessed at: a shape this
+			// package cannot render is a caller bug, and emitting something
+			// plausible would hide it behind a slide that merely looks wrong.
+			continue
+		}
+		id++
+	}
+	return b.String()
+}
+
+func slideRels(n, images int, native bool) string {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/slide%d.png"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide%d.xml"/>
-</Relationships>
-`, n, n)
+`)
+	fmt.Fprintf(&b, `  <Relationship Id="%s" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>`+"\n", relSlideLayout)
+	fmt.Fprintf(&b, `  <Relationship Id="%s" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide%d.xml"/>`+"\n", relNotesSlide, n)
+	for j := 0; j < images; j++ {
+		fmt.Fprintf(&b, `  <Relationship Id="%s" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/%s"/>`+"\n",
+			imageRelID(j), strings.TrimPrefix(mediaName(n, j, native), "ppt/media/"))
+	}
+	b.WriteString("</Relationships>\n")
+	return b.String()
 }
 
 func notesXML(notes, lang string) string {

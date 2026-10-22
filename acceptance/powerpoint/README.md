@@ -51,15 +51,40 @@ A **skip** means nothing at all. Set `POWERPOINT_ACCEPTANCE_REQUIRED=1` in
 any run whose purpose is to verify PowerPoint, and absent prerequisites
 become a failure instead.
 
+## The one thing that actually blocks this
+
+**Windows is easy to get; PowerPoint is not.** Both runtimes below give you a
+Windows guest — the container one downloads its own media — and neither
+installs Office. Windows on its own cannot answer the question this harness
+exists for: the defects that shipped were rejected by *PowerPoint's* OPC
+parser, and nothing else has one.
+
+So Office must be installed into the guest once and kept, and that needs a
+licence. No script can arrange that, however convenient the image is.
+
+## Two runtimes
+
+Chosen per profile with `RUNTIME=`:
+
+| | `container` | `qemu` |
+| --- | --- | --- |
+| Setup | brings its own media | provision a VM yourself |
+| Reproducible | manual Office state | snapshot restored per run |
+| Cost | tens of GB | the image you already made |
+
+**Watch where the disk goes.** `CONTAINER_STORAGE` is deliberately *not* the
+container runtime's own store: that store is often on a cache tier with little
+headroom — on the machine this was written on, podman's graph root sits on a
+volume at 83% full — and a Windows install with Office is tens of gigabytes.
+Point it at a disk with room.
+
 ## Running it
 
-### From the Linux host, against a VM
-
 ```bash
-make pptx-acceptance PROFILE=ppt2016
-make pptx-acceptance PROFILE=ppt2016 PPTX=/path/to/deck.pptx SLIDES=33
-scripts/powerpoint-acceptance.sh --profile ppt2016 \
-  --pptx dist/deck.pptx --slides 33 --dry-run
+make pptx-acceptance PROFILE=win10-ppt
+make pptx-acceptance PROFILE=win10-ppt PPTX=/path/to/deck.pptx SLIDES=34
+scripts/powerpoint-acceptance.sh --profile win10-ppt \
+  --pptx dist/deck.pptx --slides 34 --dry-run
 ```
 
 With no `PPTX=`, the target builds `examples/sample-deck` first, so the
@@ -185,6 +210,32 @@ the standard library, and does it *more* strictly than `Image.verify()`,
 which checks chunk CRCs but never decompresses the pixel data. A slide
 PowerPoint began writing and abandoned passed Pillow and fails this.
 
+## Testing the orchestrator — this part does run here
+
+```bash
+make acceptance-selftest
+```
+
+32 assertions over `scripts/powerpoint-acceptance.sh` with the guest faked:
+`podman`, `ssh`, `scp`, `qemu-img` and `qemu-system-x86_64` are replaced with
+scripts that log every invocation and answer the way a real guest would.
+
+The orchestrator was the part of this harness that had never been exercised,
+because exercising it needed the very thing that is missing. That left its
+whole sequence unverified — including **which exit code it reports**, which is
+the worst thing here to get wrong: it is the difference between "PowerPoint
+refused the file" and "we never asked PowerPoint". The selftest pins exactly
+that: a guest exit of 1 must surface as 1 with "RAN and FAILED" and must
+*not* say "DID NOT RUN", while a missing runtime must be 3 and must say it.
+
+It found a real bug on first run. Runtime dispatch was written
+`[[ $RUNTIME == qemu ]] && qemu_alive || container_alive`, which runs the
+third branch whenever the second is false — so every time the VM was found
+dead, the orchestrator asked the *container* whether it was running and
+carried on.
+
+What it does not test is Windows, which no amount of faking stands in for.
+
 ## Testing the harness itself
 
 ```bash
@@ -220,6 +271,27 @@ ships `check-selftest` and `validate-selftest`.
 
 If that test ever fails, **every pass in the file is void** until it is
 explained.
+
+## Font embedding: the first thing to test here
+
+`-pptx-embed-fonts` writes plain sfnt into `ppt/fonts/*.fntdata`. PowerPoint
+itself writes EOT there. **Which one PowerPoint will read is unknown**, and it
+cannot be determined without a PowerPoint: LibreOffice ignores embedded
+`.pptx` fonts regardless of format — verified against a real file carrying
+Microsoft's own EOT fonts for a typeface not installed on the test machine,
+which it substituted anyway.
+
+So when a licensed PowerPoint is available, this is the highest-value thing to
+point it at:
+
+1. Build with `-pptx-embed-fonts` and a typeface the VM does **not** have
+   installed, so substitution is detectable.
+2. Open it and check whether the text renders in that face.
+3. If it substitutes, the format is wrong and EOT is the next thing to try —
+   and at that point there is finally an oracle to develop it against.
+
+Until then, treat the typeface named in a deck as the thing that matters, and
+read the font warning every build prints.
 
 ## The zip-version diagnostic
 

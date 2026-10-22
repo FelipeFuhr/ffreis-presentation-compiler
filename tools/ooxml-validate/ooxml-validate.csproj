@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Optional tool, in the same spirit as the LibreOffice round-trip and the
+       tesseract OCR parity check: the Go build does not need it, `doctor`
+       reports whether it is available, and nothing in `quality-gates` depends
+       on it. It is here because it is Microsoft's own OOXML stack, which is
+       the nearest free thing to the reader whose opinion actually matters. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>ooxml-validate</AssemblyName>
+    <RootNamespace>OoxmlValidate</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pinned, not floating: this is a measuring instrument, and a validator
+         that changes its mind between runs cannot tell you whether the file
+         changed or the tool did. -->
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.1.1" />
+  </ItemGroup>
+
+</Project>

@@ -165,10 +165,75 @@ other generators share — that part is d2's own CLI, unrelated to the rewrite.
 
 ## PPTX export
 
-`-formats pptx` writes a PowerPoint file in **image mode**: each slide is the
-render, and the slide's kicker, title and `notes` are preserved as speaker
-notes. Fidelity is exact; nothing is editable. The deck source stays the
-editable artefact — this is for handing a file to someone who expects `.pptx`.
+`-formats pptx` writes a PowerPoint file in one of two modes,
+`-pptx-mode=native` (the default) or `-pptx-mode=image`. Neither replaces the
+other, which is why it is a flag:
+
+| | `native` | `image` |
+| --- | --- | --- |
+| Content | text boxes, `a:tbl` tables, pictures | one full-bleed render |
+| Editable | yes | no |
+| Matches the PDF | close, not exact | exactly |
+| Needs a browser | yes, to measure | yes, to render |
+
+**Native is the default because a deck handed to someone is usually handed
+over to be worked on**, and a file that cannot be edited is a dead end for
+them. Image mode stays for when the file must look precisely like the PDF
+that was reviewed.
+
+Speaker notes are written in both.
+
+### Native mode: content from the model, geometry from the render
+
+A theme describes each layout in PPTX terms as `<theme>/pptx/<layout>.yaml`,
+and **the shapes in it name CSS selectors rather than coordinates**:
+
+```yaml
+background: paper
+shapes:
+  - { kind: text,    from: title,  measure: .slide-title }
+  - { kind: table,   fill: accent, measure: .deck-table }
+  - { kind: bullets, from: items,  measure: .checklist }
+```
+
+The *content* comes from the deck model, so a table is a real table. The
+*geometry and formatting* come from the browser's own layout of that element,
+read over CDP by `internal/pptxlayout/measure.js`.
+
+**The first version of these specs stated every rectangle by hand, and it was
+wrong twice over.** Absolute positions leave a hole wherever an optional shape
+is skipped, and a table's rows were divided evenly instead of sized by
+content. Measured against the reference render, tables were 14–18% of pixels
+different. Switching to measurement took tables to 10.2% and the editable set
+overall from 11.7% to 8.2%, against a 2.9% floor (what two *identical* images
+score, i.e. LibreOffice's rasterisation noise). Sections landed at 1.4%, below
+the floor.
+
+What measurement cannot fix is text re-flow: PowerPoint breaks lines inside a
+text box itself, so bullets barely improved (8.2% → 7.8%). Emitting one box
+per line would close that and destroy the editability the mode exists for.
+
+- **A spec's explicit `style:` wins over the measured value**; booleans are
+  ORed, since a spec cannot say "not bold" by omitting bold. Change the CSS,
+  which is the thing being described.
+- **`at: [x, y, w, h]`** in inches still works, for a shape with no DOM
+  counterpart. A zero width or height on a picture means `auto`, derived from
+  the file's own pixels — forcing both squashed a 96×81 crest by 16%.
+- **`asset:`** places an image from the theme's own directory, and **`when:`**
+  gates a shape on a field — between them they express a template's
+  `{{ with get .Fields "logo" }}` lockup.
+- **Intrinsics** `slide.number` and `deck.{title,subtitle,client,footer}`
+  reach the values that are not slide chrome, which is what the footer and the
+  cover need.
+- **Measurement failure falls back wholesale**, not partly: a spec written
+  against measurement has no usable geometry without it, and half-placed
+  shapes are worse than the flat image. The build says so.
+- **A layout with no spec keeps its rendered image, per slide.** A deck is
+  therefore allowed to be partly editable, which is what makes this usable
+  before every layout is described. `build` reports the count and names the
+  layouts that fell back.
+
+The deck source remains the authoritative artefact in both modes.
 
 **The non-obvious part is the zip, not the XML.** `archive/zip`'s ordinary
 `Create`/`CreateHeader` path streams each entry and appends a *data descriptor*,
@@ -255,6 +320,128 @@ its silence means nothing. Treat it as one lenient reader's opinion, not as
 proof the file opens. The reader whose opinion actually matters is the one
 below.
 
+## Measured checks on the exported file (`internal/pptxcheck`)
+
+**This is a correction of method, and the correction matters more than the
+rules.** A native cover shipped with its title drawing 25.8 points on top of
+the subtitle, and everything passed:
+
+- `check` measures the rendered DOM. The DOM was **correct** — the overlap
+  appeared when a *reader* re-broke the lines inside a box sized from it.
+- `verify` measures the package. The package was conformant; a text box that
+  overflows is perfectly well-formed OOXML.
+- The side-by-side comparison scored that slide at **3.0% different, better
+  than twenty others**, because a pixel-difference percentage is a
+  *similarity* score and 25.8pt of collision is a rounding error against
+  921,600 pixels.
+
+The mistake was asking "does it look like the reference?" and treating the
+answer as "is it broken?". Only the first had ever been asked of a `.pptx`.
+
+`pptx-check` asks the second, the way `check` asks it of the DOM: render the
+artifact, measure where the glyphs landed, report invariants that hold
+whatever the reference looks like. Five rules — `pptx-overlap`,
+`pptx-out-of-bounds`, `pptx-tiny-type`, `pptx-missing-text`,
+`pptx-slide-count` — with `TestEachRuleFires` as the selftest.
+
+```bash
+go run ./cmd/ffreis-presentation-compiler pptx-check \
+  -pptx dist/deck.pptx -deck-root decks/<name>
+```
+
+- **`pptx-missing-text` is the one that earns its place.** It is `parity`'s
+  question with the guesswork removed: a native slide carries real text, so
+  the comparison is exact rather than OCR-tolerant. Run on the first native
+  build it found **six slides silently missing their Markdown body prose** —
+  the specs mapped `.deck-table` and `.table-source` but never `.table-note`.
+  Nothing else could have noticed.
+- **Image-mode slides are exempt from it**, and say so: a flat picture has no
+  extractable text, so every word would read as missing on exactly the slides
+  the rule cannot judge.
+- **Two false positives were designed out rather than tolerated.** Letter-
+  spaced type extracts with the glyph gaps read as word breaks, so a tracked
+  kicker arrives as `PROPO STA DE PROJ E TO`; each line is therefore also
+  matched as one collapsed run of letters. And adjacent lines may share a
+  point, because PDF word boxes include ascent and descent.
+- **It finds *a* reader's defects, not PowerPoint's.** LibreOffice's wrapping
+  is its own. That is still the difference between measuring and guessing.
+
+### The three fixes it drove, in order
+
+Each was surfaced by the previous measurement, which is the point:
+
+1. **`<a:normAutofit/>` on every text body.** Nothing told the reader what to
+   do when text did not fit, so it drew outside the box. `spAutoFit` would be
+   wrong — it grows the box and moves everything after it. Locked by
+   `text-autofit` in `verify.go`, whose invariant is not "the text fits" (not
+   knowable at write time) but "the package said what to do when it doesn't".
+2. **`slide.body`**, exposing `deck.Slide.BodyText()` — the body as characters
+   rather than rendered HTML — so the prose those six slides were losing can
+   be mapped. Only block ends break: a Markdown soft-wrap inside a paragraph
+   is a space, and treating it as a break split one paragraph into several.
+3. **`grow_to`** on a shape spec. Mapping the prose made `normAutofit` shrink
+   it to **6pt** on three slides, which `pptx-tiny-type` caught immediately —
+   the two rules have to travel together. `grow_to: .slide-body` claims the
+   space the layout already reserves beneath the prose, so a reader needing an
+   extra line pays in height rather than in type size. Bounded by
+   construction: the box can only reach the named element's bottom.
+
+The deck went 9 findings → 6 → 3 → **0 across 34 slides**.
+
+## Typefaces
+
+**OOXML names exactly one typeface per run and has no fallback stack.** The CSS
+`Roboto, sans-serif` cannot be expressed; a machine without the named face
+substitutes silently, and the deck arrives in something else. So the typeface
+is a decision, not an inheritance:
+
+1. `-pptx-font` wins.
+2. Then the theme's own `pptx_font:`.
+3. Then the face the render measured, which is what the runs use anyway — this
+   is what keeps the theme's `fontScheme` and the runs agreeing. They did not
+   at first: the scheme fell back to `DefaultFont` while the runs named the
+   measured face, so the package disagreed with itself.
+4. Then `pptx.DefaultFont`, which is **Calibri** — chosen only because Office
+   ships it and it therefore cannot substitute.
+
+**`theme1.xml` is a template, not a finished asset.** Its `fontScheme` used to
+hardcode `Roboto` — one consumer's font inside a consumer-agnostic compiler,
+the same leak as this package's old `pt-BR` notes default. The typeface is
+substituted at write time and the placeholder is **required**: if an edit to
+the asset drops it, `themeXML` fails rather than shipping whatever face the
+asset happened to name.
+
+**Every build reports what a reader will actually see.** `pptx.Fonts` lists
+each typeface the package names and whether it is embedded, ships with Office,
+or will substitute — the last is a warning on stderr, because it is the
+difference between the deck the author saw and the deck the reader gets.
+`+mj-lt`/`+mn-lt` are skipped: they are references *into* the fontScheme, and
+reporting them was a false positive on every build.
+
+### Embedding is implemented and unproven — read this before relying on it
+
+`-pptx-embed-fonts` ships a theme's `pptx/fonts/*.ttf` inside the package as
+`ppt/fonts/*.fntdata`. The structure is verified (`font-embedding` rule: every
+declaration resolves to real, typed, non-empty data, and no orphan font parts).
+**Whether PowerPoint reads it is not known, and could not be determined here.**
+
+- The data written is plain **sfnt**. ECMA-376 calls the part "font data" and
+  mandates no container.
+- PowerPoint writes **EOT** instead: a real `.pptx` to hand has `.fntdata`
+  beginning with an EOT header (size, font-data size, version `0x00020002`)
+  wrapping MTX-compressed data, with no sfnt table tags anywhere.
+- **The experiment that would settle it cannot be run.** A font renamed to a
+  unique family, embedded, converted by LibreOffice: substituted. The control
+  — the real-world `.pptx` carrying Microsoft's own EOT fonts for a typeface
+  not installed on this machine — converted by the same LibreOffice:
+  substituted too. **LibreOffice ignores embedded `.pptx` fonts regardless of
+  format**, which removes the only reader available.
+
+So writing an EOT encoder would be binary-format code with no way to tell
+whether it worked. Embedding stays off by default, the answer a deck should
+rely on is naming a face the reader has, and testing this is the first thing
+worth doing with a licensed PowerPoint (see `acceptance/powerpoint`).
+
 ## Self-verification (`internal/engine/pptx/verify.go`)
 
 **`Write` verifies its own output before renaming the temp file into place**, so
@@ -307,6 +494,37 @@ Measured against the real history: the file with the zero zip version reports
 only the shared theme reports 1, and the current output reports 0 — as do
 PowerPoint's own repaired copy of our file and a python-pptx-authored deck.
 
+## Which readers are strict (`tools/ooxml-validate`)
+
+Six readers have now been measured against the defects this writer shipped,
+and **only one is strict**:
+
+| Reader | zero zip version | shared theme part |
+| --- | --- | --- |
+| `zipfile` / `unzip -t` | accepted | n/a |
+| python-pptx | accepted | accepted |
+| LibreOffice | accepted | accepted |
+| Go `archive/zip` | accepted | n/a |
+| Microsoft Open XML SDK | accepted | accepted |
+| **desktop PowerPoint** | **refused** | **repaired** |
+
+**So LibreOffice is not a proxy, and nor is Microsoft's own SDK.** The obvious
+idea — run LibreOffice or OpenOffice on Windows instead of Linux — changes the
+OS and not the parser, and that parser is 0 for 4 on these defects.
+
+`tools/ooxml-validate` is a small .NET app over `System.IO.Packaging` and the
+Open XML SDK: Microsoft's code rather than a reimplementation. Its value is
+real and narrow, and was measured rather than assumed — it catches a missing
+`[Content_Types].xml`, an invalid child element (naming the part and XPath)
+and a missing required element, and it **accepts the package PowerPoint
+refused**, because `.NET`'s own `ZipArchive` ignores the advisory version
+field like everything else. `make ooxml-validate PPTX=<file>`; `make doctor`
+reports whether `dotnet` is present.
+
+The container invariants are therefore not delegated to it. They are held by
+`verify.go`, which `Write` runs on its own output — the only check in this
+repo that is stricter than every reader available.
+
 ## PowerPoint acceptance (`acceptance/powerpoint/`)
 
 The only check here that asks **real desktop Microsoft PowerPoint** whether it
@@ -315,6 +533,26 @@ was accepted by every reader this repo could reach — `zipfile`, `unzip -t`,
 python-pptx, LibreOffice, current PowerPoint — and refused by the desktop
 PowerPoint the file was sent to. There was no reader in the toolchain strict
 enough to disagree, so a whole class of packaging defect could ship.
+
+**Two runtimes, and the blocker is neither of them.** A profile picks
+`RUNTIME=container` (dockur/windows under podman, which downloads its own
+Windows media) or `RUNTIME=qemu` (a VM you provisioned and snapshotted).
+Windows is the easy half: **neither installs Office**, and Windows alone
+cannot answer the question — the defects that shipped were rejected by
+PowerPoint's OPC parser and nothing else has one. `CONTAINER_STORAGE` is
+deliberately outside the container runtime's own store, which on this machine
+sits on a volume at 83% full against a Windows install of tens of gigabytes.
+
+**`make acceptance-selftest` is the part that does run here.** 32 assertions
+over the orchestrator with `podman`, `ssh`, `scp` and qemu faked — scripts
+that log every call and answer as a guest would. It exists because the
+orchestrator was the one piece whose own exercise needed the very thing that
+is missing, which left its exit codes unverified — and those are the worst
+thing to get wrong, being the difference between "PowerPoint refused the file"
+and "we never asked PowerPoint". It found a real bug on first run: dispatch written
+`[[ $RUNTIME == qemu ]] && qemu_alive || container_alive` runs the third
+branch whenever the second is false, so a dead VM made the orchestrator ask
+the container whether it was running.
 
 It is Python, in an otherwise-Go repo, because `pywin32` is the only practical
 way to drive PowerPoint's COM API. `make pptx-acceptance PROFILE=<name>` runs
@@ -852,6 +1090,7 @@ internal/deck/                     content model and loader
 internal/theme/                    theme loading, template FuncMap
 internal/contract/                 field-vocabulary validation (contract.yaml)
 internal/pathsafe/                 the one path-containment helper, shared by theme/gen/contract
+internal/pptxlayout/               native pptx: theme specs + measure.js
 internal/render/                   document shell + slide assembly (base.gohtml)
 internal/check/                    measured checks (probe.js)
 internal/golden/                   perceptual PNG diff for visual regression

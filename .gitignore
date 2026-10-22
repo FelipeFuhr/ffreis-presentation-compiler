@@ -23,3 +23,7 @@ __pycache__/
 acceptance/powerpoint/vm/
 acceptance/powerpoint/profiles/*.env
 !acceptance/powerpoint/profiles/example.env
+
+# tools/ooxml-validate is a .NET project; its build output is not committed.
+tools/ooxml-validate/bin/
+tools/ooxml-validate/obj/

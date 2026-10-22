@@ -28,7 +28,7 @@ func TestLoadSourcesTableRowsFromCSVAndDerivesColumnsFromItsHeader(t *testing.T)
 	// The exact bug class this exists to prevent: a pt-BR decimal comma. In
 	// CSV, unlike a hand-typed YAML flow sequence, the value must already be
 	// quoted to parse at all, so the comma inside it can never split a row.
-	writeCSV(t, root, "data/bench.csv", "Clube,Torcedores,Arrecadação\nGrêmio,\"9,8 milhões\",\"R$ 90 milhões\"\n")
+	writeCSV(t, root, "data/bench.csv", "Clube,Torcedores,Arrecadação\nClube Ômega,\"9,8 milhões\",\"R$ 90 milhões\"\n")
 
 	d, err := deck.Load(root)
 	if err != nil {
@@ -59,7 +59,7 @@ func TestLoadAcceptsDeclaredColumnsMatchingTheCSVHeader(t *testing.T) {
 	root := writeDeck(t, manifest, map[string]string{
 		"01-bench.md": "---\nlayout: table\ntitle: Benchmark\ncolumns: [Clube, Torcedores]\nrows_csv: data/bench.csv\n---\n",
 	})
-	writeCSV(t, root, "data/bench.csv", "Clube,Torcedores\nGrêmio,\"9,8 milhões\"\n")
+	writeCSV(t, root, "data/bench.csv", "Clube,Torcedores\nClube Ômega,\"9,8 milhões\"\n")
 
 	d, err := deck.Load(root)
 	if err != nil {
@@ -75,7 +75,7 @@ func TestLoadRejectsACSVHeaderThatDisagreesWithDeclaredColumns(t *testing.T) {
 	root := writeDeck(t, manifest, map[string]string{
 		"01-bench.md": "---\nlayout: table\ntitle: Benchmark\ncolumns: [Clube, Associados]\nrows_csv: data/bench.csv\n---\n",
 	})
-	writeCSV(t, root, "data/bench.csv", "Clube,Torcedores\nGrêmio,9800000\n")
+	writeCSV(t, root, "data/bench.csv", "Clube,Torcedores\nClube Ômega,9800000\n")
 
 	_, err := deck.Load(root)
 	if err == nil {
@@ -107,7 +107,7 @@ func TestLoadRejectsARaggedCSVRow(t *testing.T) {
 	// Row 2 has three fields against a two-column header — exactly the arity
 	// bug, except here it is a parse error naming the line, not a table that
 	// silently renders with every value shifted one column to the right.
-	writeCSV(t, root, "data/bench.csv", "Clube,Torcedores\nGrêmio,9800000,extra\n")
+	writeCSV(t, root, "data/bench.csv", "Clube,Torcedores\nClube Ômega,9800000,extra\n")
 
 	_, err := deck.Load(root)
 	if err == nil || !strings.Contains(err.Error(), "bench.csv") {
