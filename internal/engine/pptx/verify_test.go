@@ -382,3 +382,111 @@ func TestWriteRefusesToShipAnInvalidPackage(t *testing.T) {
 		t.Errorf("left behind: %s", e.Name())
 	}
 }
+
+// ── the findings a human reads ──────────────────────────────────────────────
+
+func TestFindingStringNamesThePartWhenThereIsOne(t *testing.T) {
+	withPart := pptx.Finding{Rule: pptx.RuleZipVersion, Part: "ppt/slides/slide1.xml", Detail: "declares 0"}
+	if got, want := withPart.String(), "zip-version: ppt/slides/slide1.xml: declares 0"; got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+
+	// A package-level finding has no part, and must not render an empty one --
+	// "zip-version: : ..." reads like a bug in the reporter.
+	packageWide := pptx.Finding{Rule: pptx.RuleEntryCount, Detail: "the package has no entries"}
+	if got, want := packageWide.String(), "entry-count: the package has no entries"; got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+}
+
+func TestFindingsErrorListsEveryFinding(t *testing.T) {
+	err := &pptx.FindingsError{
+		Path: "/out/deck.pptx",
+		Findings: []pptx.Finding{
+			{Rule: pptx.RuleThemePerMaster, Part: "ppt/theme/theme1.xml", Detail: "shared by 2 masters"},
+			{Rule: pptx.RuleMediaIntegrity, Part: "ppt/media/slide1.png", Detail: "is not a complete PNG"},
+		},
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"/out/deck.pptx", "2 finding(s)",
+		"theme-per-master: ppt/theme/theme1.xml: shared by 2 masters",
+		"media-integrity: ppt/media/slide1.png: is not a complete PNG",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("Error() is missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+// ── error paths ─────────────────────────────────────────────────────────────
+
+func TestVerifyReportsAnUnreadableFile(t *testing.T) {
+	if _, err := pptx.Verify(filepath.Join(t.TempDir(), "absent.pptx")); err == nil {
+		t.Error("want an error for a file that does not exist")
+	}
+}
+
+func TestVerifyBytesRejectsSomethingThatIsNotAZip(t *testing.T) {
+	// An error, not a finding: without a central directory there is no package
+	// to report findings about, and saying "0 findings" would read as a pass.
+	if _, err := pptx.VerifyBytes([]byte("this is not a zip archive")); err == nil {
+		t.Error("want an error for bytes with no end-of-central-directory record")
+	}
+}
+
+func TestVerifyReportsAPackageWithNoContentTypeMap(t *testing.T) {
+	parts := explode(t, goodPackage(t))
+	kept := parts[:0]
+	for _, p := range parts {
+		if p.name != "[Content_Types].xml" {
+			kept = append(kept, p)
+		}
+	}
+	findings := verifyBytes(t, rezip(t, kept))
+	if rules(findings)[pptx.RuleContentType] == 0 {
+		t.Errorf("want a content-type finding, got %v", rules(findings))
+	}
+}
+
+func TestVerifyReportsAPackageWithNoPresentationPart(t *testing.T) {
+	parts := explode(t, goodPackage(t))
+	kept := parts[:0]
+	for _, p := range parts {
+		if p.name != "ppt/presentation.xml" {
+			kept = append(kept, p)
+		}
+	}
+	findings := verifyBytes(t, rezip(t, kept))
+	if rules(findings)[pptx.RuleSlideIDList] == 0 {
+		t.Errorf("want a slide-id-list finding, got %v", rules(findings))
+	}
+}
+
+func TestVerifyReportsAMasterWithNoTheme(t *testing.T) {
+	parts := explode(t, goodPackage(t))
+	for i := range parts {
+		if parts[i].name == "ppt/notesMasters/_rels/notesMaster1.xml.rels" {
+			parts[i].body = []byte(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+				`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`)
+		}
+	}
+	findings := verifyBytes(t, rezip(t, parts))
+	if rules(findings)[pptx.RuleThemePerMaster] == 0 {
+		t.Errorf("want a theme-per-master finding for a master with no theme, got %v", rules(findings))
+	}
+}
+
+func TestVerifyReportsASlideListedButMissing(t *testing.T) {
+	parts := explode(t, goodPackage(t))
+	kept := parts[:0]
+	for _, p := range parts {
+		if p.name != "ppt/slides/slide2.xml" {
+			kept = append(kept, p)
+		}
+	}
+	findings := verifyBytes(t, rezip(t, kept))
+	if rules(findings)[pptx.RuleSlideIDList] == 0 {
+		t.Errorf("want a slide-id-list finding for a listed-but-absent slide, got %v", rules(findings))
+	}
+}
