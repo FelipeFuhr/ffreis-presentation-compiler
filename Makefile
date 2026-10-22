@@ -44,7 +44,7 @@ MUTATION_THRESHOLD ?= 60
 	validate-deck validate-selftest \
 	seo-selftest seo-audit \
 	golden golden-update review metrics \
-	pptx-acceptance acceptance-test
+	pptx-acceptance acceptance-test acceptance-selftest
 
 ## mutation: run mutation testing with gremlins (slow — CI only)
 mutation:
@@ -440,6 +440,9 @@ acceptance-test: ## Run the PowerPoint harness's own portable tests (no Windows 
 	@cd $(ACCEPTANCE_DIR) && uv run --no-project --with "pytest==$(ACCEPTANCE_PYTEST)" -- \
 		python -m pytest -q -p no:cacheprovider
 	@echo "acceptance-test: ok -- the Windows-only tests skipped, as they must off-Windows"
+
+acceptance-selftest: ## Prove the acceptance orchestrator works, without Windows
+	@./$(ACCEPTANCE_DIR)/selftest.sh
 
 pptx-acceptance: ## Open the built pptx in real PowerPoint in a VM: make pptx-acceptance PROFILE=<name>
 	@[ -n "$(PROFILE)" ] || { \

@@ -427,6 +427,26 @@ only the shared theme reports 1, and the current output reports 0 — as do
 PowerPoint's own repaired copy of our file and a python-pptx-authored deck.
 
 ## PowerPoint acceptance (`acceptance/powerpoint/`)
+**Two runtimes, and the blocker is neither of them.** A profile picks
+`RUNTIME=container` (dockur/windows under podman, which downloads its own
+Windows media) or `RUNTIME=qemu` (a VM you provisioned and snapshotted).
+Windows is the easy half: **neither installs Office**, and Windows alone
+cannot answer the question — the defects that shipped were rejected by
+PowerPoint's OPC parser and nothing else has one. `CONTAINER_STORAGE` is
+deliberately outside the container runtime's own store, which on this machine
+sits on a volume at 83% full against a Windows install of tens of gigabytes.
+
+**`make acceptance-selftest` is the part that does run here.** 32 assertions
+over the orchestrator with `podman`, `ssh`, `scp` and qemu faked — scripts
+that log every call and answer as a guest would. It exists because the
+orchestrator was the one piece exercising which needed the very thing that is
+missing, leaving its exit codes unverified; and those are the worst thing to
+get wrong, being the difference between "PowerPoint refused the file" and "we
+never asked PowerPoint". It found a real bug on first run: dispatch written
+`[[ $RUNTIME == qemu ]] && qemu_alive || container_alive` runs the third
+branch whenever the second is false, so a dead VM made the orchestrator ask
+the container whether it was running.
+
 
 The only check here that asks **real desktop Microsoft PowerPoint** whether it
 will open what this compiler wrote. It exists because the zip-version bug above
