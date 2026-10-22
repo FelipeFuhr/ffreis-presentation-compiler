@@ -418,29 +418,62 @@ difference between the deck the author saw and the deck the reader gets.
 `+mj-lt`/`+mn-lt` are skipped: they are references *into* the fontScheme, and
 reporting them was a false positive on every build.
 
-### Embedding is implemented and unproven — read this before relying on it
+### Embedding: where the bytes come from
 
-`-pptx-embed-fonts` ships a theme's `pptx/fonts/*.ttf` inside the package as
-`ppt/fonts/*.fntdata`. The structure is verified (`font-embedding` rule: every
-declaration resolves to real, typed, non-empty data, and no orphan font parts).
-**Whether PowerPoint reads it is not known, and could not be determined here.**
+`-pptx-embed-fonts` is **on by default**. It carries the deck's typeface inside
+the package as `ppt/fonts/*.fntdata`, so the face cannot substitute on a
+machine that lacks it.
 
-- The data written is plain **sfnt**. ECMA-376 calls the part "font data" and
-  mandates no container.
-- PowerPoint writes **EOT** instead: a real `.pptx` to hand has `.fntdata`
-  beginning with an EOT header (size, font-data size, version `0x00020002`)
-  wrapping MTX-compressed data, with no sfnt table tags anywhere.
-- **The experiment that would settle it cannot be run.** A font renamed to a
-  unique family, embedded, converted by LibreOffice: substituted. The control
-  — the real-world `.pptx` carrying Microsoft's own EOT fonts for a typeface
-  not installed on this machine — converted by the same LibreOffice:
-  substituted too. **LibreOffice ignores embedded `.pptx` fonts regardless of
-  format**, which removes the only reader available.
+Three sources, searched in order by `internal/fontsource`:
 
-So writing an EOT encoder would be binary-format code with no way to tell
-whether it worked. Embedding stays off by default, the answer a deck should
-rely on is naming a face the reader has, and testing this is the first thing
-worth doing with a licensed PowerPoint (see `acceptance/powerpoint`).
+1. the theme's `pptx/fonts/` — vendored, so the build is reproducible anywhere;
+2. the theme's own `fonts/` — the directory the HTML already uses;
+3. **the fonts installed on the machine running the build**, via `fc-match`.
+
+The third is the one that matters in practice. A deck set in a face the author
+installed but never copied into the repo is the normal case, and looking only
+at vendored files meant the only embeddable typefaces were the ones somebody
+remembered to commit. Every build reports which source answered, because
+embedding from a machine's own font set is only as reproducible as that
+machine.
+
+Two refusals are deliberate. **`.woff`/`.woff2` are not embeddable** — an EOT
+payload is sfnt, and decompressing woff2 means Brotli plus reversing the glyf
+transform; a theme that self-hosts web fonts is told so by name rather than
+silently substituting. And **`fc-match` always answers**: asked for a face that
+is not installed it returns the system's best substitute, so both the family
+and the style it reports are compared against what was asked. Without that
+guard a deck naming Roboto would quietly embed DejaVu Sans.
+
+A face Office ships (`fontsAssumedPresent`) is named rather than embedded:
+it cannot substitute, and embedding one adds a megabyte to a file that gets
+emailed. `fsType` is honoured — a font whose licence forbids embedding fails
+the build naming the face and the bits, rather than putting a licence
+violation in a client's file.
+
+### What is established about the container, and what is not
+
+**Established**, by reading a real PowerPoint-authored `.pptx` that embeds two
+faces: the container is **EOT**, `MagicNumber` is `0x504C`, `Version` is
+`0x00020002`, the header states the family name, weight, slope and `fsType` a
+reader matches against, and `EOTSize - FontDataSize` is exactly the header
+length. This repo previously wrote **raw sfnt with no header at all** — well
+formed OOXML pointing at data no reader could identify — and every check
+passed, because every check was about the package and not about the font.
+`verify`'s `font-container` rule now gates it.
+
+**Not established**: whether PowerPoint *requires* MTX compression. Its own
+files set `TTEMBED_TTCOMPRESSED` and the payload examined began `03 01 49 20`,
+which is no sfnt magic. This writes a valid **uncompressed** EOT, which the
+format permits.
+
+**The experiment that would settle it still cannot be run here.** A font
+renamed to a unique family, embedded, converted by LibreOffice: substituted.
+The control — the real `.pptx` carrying Microsoft's own EOT fonts for a face
+not installed on this machine — converted by the same LibreOffice: substituted
+too. **LibreOffice ignores embedded `.pptx` fonts regardless of format**,
+which removes the only reader available. Testing this is the first thing worth
+doing with a licensed PowerPoint (see `acceptance/powerpoint`).
 
 ## Self-verification (`internal/engine/pptx/verify.go`)
 

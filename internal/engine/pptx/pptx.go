@@ -211,7 +211,10 @@ func writeParts(z *zip.Writer, d Deck) error {
 		part{"ppt/theme/theme2.xml", theme},
 	)
 
-	fontBodies, fontRels, fontList := fontParts(d.EmbeddedFonts, presRels{slides: len(d.Slides)}.firstFont())
+	fontBodies, fontRels, fontList, err := fontParts(d.EmbeddedFonts, presRels{slides: len(d.Slides)}.firstFont())
+	if err != nil {
+		return err
+	}
 	parts = append(parts,
 		part{"ppt/presentation.xml", []byte(presentation(d, fontList))},
 		part{"ppt/_rels/presentation.xml.rels", []byte(presentationRels(len(d.Slides), fontRels))},

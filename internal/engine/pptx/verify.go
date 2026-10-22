@@ -66,6 +66,7 @@ const (
 	RuleMediaIntegrity     = "media-integrity"
 	RuleFontEmbedding      = "font-embedding"
 	RuleTextAutofit        = "text-autofit"
+	RuleFontContainer      = "font-container"
 )
 
 // Rules is every rule Verify can report.
@@ -95,6 +96,7 @@ func Rules() []string {
 		RuleSlideSize,
 		RuleMediaIntegrity,
 		RuleFontEmbedding,
+		RuleFontContainer,
 		RuleTextAutofit,
 	}
 }
@@ -912,6 +914,8 @@ func checkFonts(names []string, bodies map[string][]byte, rels map[string]map[st
 			if len(bodies[target]) == 0 {
 				out = append(out, Finding{Rule: RuleFontEmbedding, Part: target,
 					Detail: fmt.Sprintf("embedded font %q has an empty data part", typeface)})
+			} else {
+				out = append(out, checkFontContainer(target, typeface, bodies[target])...)
 			}
 			if rel.Type != fontRelType {
 				out = append(out, Finding{Rule: RuleFontEmbedding, Part: presPart,
@@ -950,6 +954,40 @@ func checkFonts(names []string, bodies map[string][]byte, rels map[string]map[st
 				break
 			}
 		}
+	}
+	return out
+}
+
+// checkFontContainer holds the shape of one .fntdata part.
+//
+// A font part is not just bytes a reader is handed: it is an EOT container
+// whose header states the magic number, the family name, the weight and the
+// slope a reader matches against the typeface a slide names. This package
+// shipped raw sfnt here for a release -- well-formed OOXML pointing at data
+// no reader could identify -- and every other rule passed, because every
+// other rule was about the package and not about the font.
+func checkFontContainer(part, typeface string, body []byte) []Finding {
+	h, err := eotHeaderOf(body)
+	if err != nil {
+		return []Finding{{Rule: RuleFontContainer, Part: part, Detail: fmt.Sprintf(
+			"embedded font %q is not an EOT container: %v", typeface, err)}}
+	}
+
+	var out []Finding
+	if h.Family == "" {
+		out = append(out, Finding{Rule: RuleFontContainer, Part: part, Detail: fmt.Sprintf(
+			"embedded font %q declares no family name in its header, so nothing can match it", typeface)})
+	}
+	if int(h.EOTSize) != len(body) {
+		out = append(out, Finding{Rule: RuleFontContainer, Part: part, Detail: fmt.Sprintf(
+			"embedded font %q declares EOTSize %d in a part of %d bytes", typeface, h.EOTSize, len(body))})
+	}
+	// The payload has to fit, and has to be there. A header claiming more
+	// font data than the part holds is how a truncated copy would look.
+	if hdr := int(h.EOTSize) - int(h.FontDataSize); hdr <= 0 || int(h.FontDataSize) > len(body) {
+		out = append(out, Finding{Rule: RuleFontContainer, Part: part, Detail: fmt.Sprintf(
+			"embedded font %q declares %d bytes of font data inside a %d-byte part",
+			typeface, h.FontDataSize, len(body))})
 	}
 	return out
 }
