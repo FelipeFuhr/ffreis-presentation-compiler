@@ -119,8 +119,51 @@ func TestWebFontsAreNamedAsUnusable(t *testing.T) {
 	if len(faces) != 0 {
 		t.Errorf("a .woff2 was offered for embedding: %v", faces)
 	}
-	if !strings.Contains(strings.Join(notes, "\n"), "cannot be embedded") {
+	joined := strings.Join(notes, "\n")
+	if !strings.Contains(joined, "cannot carry") {
 		t.Errorf("notes do not explain why the web fonts were skipped: %v", notes)
+	}
+	// And they name WHICH variants, since that is what the reader has to act on.
+	for _, want := range []string{"regular", "bold"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("notes do not name the %s variant: %v", want, notes)
+		}
+	}
+}
+
+func TestAWebFontIsNotMentionedWhenSomethingElseSuppliesThatVariant(t *testing.T) {
+	// A .woff2 sitting beside the .ttf that was actually used is not worth a
+	// word. The note is advice, and there is nothing to act on.
+	dir := writeFontDir(t, "Roboto-Regular.ttf", "Roboto-Regular.woff2",
+		"Roboto-Bold.ttf", "Roboto-Italic.ttf", "Roboto-BoldItalic.ttf")
+	faces, notes := resolve(t, "Roboto", fontsource.Options{Dirs: []string{dir}})
+	if len(faces) != 4 {
+		t.Fatalf("got %d faces, want all four", len(faces))
+	}
+	if len(notes) != 0 {
+		t.Errorf("a fully-resolved typeface produced notes: %v", notes)
+	}
+}
+
+func TestAWebFontIsNotBlamedForAVariantItDoesNotHave(t *testing.T) {
+	// The real case this narrowing fixes. A theme self-hosts regular, bold
+	// and italic as .woff2 and vendors the same three as .ttf; the variant
+	// still missing is boldItalic, which the web fonts do not carry either.
+	//
+	// Fired on any unfilled variant, the note told a theme that had already
+	// shipped the right .ttf files to ship them again.
+	dir := writeFontDir(t,
+		"Roboto-Regular.ttf", "Roboto-Bold.ttf", "Roboto-Italic.ttf",
+		"Roboto-Regular.woff2", "Roboto-Bold.woff2", "Roboto-Italic.woff2")
+	_, notes := resolve(t, "Roboto", fontsource.Options{Dirs: []string{dir}})
+
+	joined := strings.Join(notes, "\n")
+	if strings.Contains(joined, "web font") {
+		t.Errorf("blamed the web fonts for a variant they do not have: %v", notes)
+	}
+	// The honest note remains: one variant has no file anywhere.
+	if !strings.Contains(joined, "no file found for boldItalic") {
+		t.Errorf("notes do not report the genuinely missing variant: %v", notes)
 	}
 }
 

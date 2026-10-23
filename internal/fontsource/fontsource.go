@@ -97,38 +97,72 @@ func Resolve(ctx context.Context, typeface string, opt Options) ([]Face, []strin
 	if name == "" {
 		return nil, nil, fmt.Errorf("fontsource: no typeface named")
 	}
+	var notes []string
 
 	found := map[Variant]Face{}
-	var notes []string
+	// web records variants seen only as a web font, and where. Judged at the
+	// end rather than per directory: a .woff2 whose variant another source
+	// supplies is not worth a word, and advising "ship it as .ttf" about a
+	// variant the web fonts do not have either is worse than silence.
+	web := map[Variant][]string{}
 	for _, dir := range opt.Dirs {
-		n, err := scanDir(dir, name, found)
-		if err != nil {
+		if err := scanDir(dir, found, web); err != nil {
 			return nil, nil, err
 		}
-		notes = append(notes, n...)
 	}
 
 	if opt.Runner != nil && len(found) < len(Variants()) {
-		notes = append(notes, fromSystem(ctx, name, opt.Runner, found)...)
+		notes = fromSystem(ctx, name, opt.Runner, found)
 	}
 
 	var faces []Face
-	var missing []string
+	var missing []Variant
 	for _, v := range Variants() {
 		if f, ok := found[v]; ok {
 			faces = append(faces, f)
 			continue
 		}
-		missing = append(missing, string(v))
+		missing = append(missing, v)
 	}
+	notes = append(notes, webFontNotes(name, missing, web)...)
 	return faces, append(notes, missingNote(name, missing)...), nil
 }
 
-func missingNote(name string, missing []string) []string {
+func missingNote(name string, missing []Variant) []string {
 	if len(missing) == 0 {
 		return nil
 	}
-	return []string{fmt.Sprintf("%s: no file found for %s", name, strings.Join(missing, ", "))}
+	return []string{fmt.Sprintf("%s: no file found for %s", name, join(missing))}
+}
+
+// webFontNotes reports web fonts that would actually have helped: a variant
+// still missing that some directory holds only as a .woff or .woff2.
+//
+// Scoped this narrowly because the note is advice. Fired on any unfilled
+// variant it told a theme that had already shipped the right .ttf files to
+// ship them again, while the variant actually missing was one its web fonts
+// did not carry either.
+func webFontNotes(typeface string, missing []Variant, web map[Variant][]string) []string {
+	var out []string
+	for _, v := range missing {
+		dirs := web[v]
+		if len(dirs) == 0 {
+			continue
+		}
+		out = append(out, fmt.Sprintf(
+			"%s: %s holds the %s variant only as a web font, which a .pptx cannot carry "+
+				"(an EOT payload is sfnt, not woff) -- ship it as .ttf or .otf, or install the face",
+			typeface, strings.Join(dirs, " and "), v))
+	}
+	return out
+}
+
+func join(vs []Variant) string {
+	out := make([]string, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, string(v))
+	}
+	return strings.Join(out, ", ")
 }
 
 // scanDir fills in variants from one directory, keeping whatever an earlier
@@ -136,16 +170,15 @@ func missingNote(name string, missing []string) []string {
 //
 // A directory that does not exist is not an error: the theme-vendored path is
 // optional by design, and most themes will not have one.
-func scanDir(dir, typeface string, found map[Variant]Face) ([]string, error) {
+func scanDir(dir string, found map[Variant]Face, web map[Variant][]string) error {
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("fontsource: read %s: %w", dir, err)
+		return fmt.Errorf("fontsource: read %s: %w", dir, err)
 	}
 
-	var webOnly []string
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -158,27 +191,14 @@ func scanDir(dir, typeface string, found map[Variant]Face) ([]string, error) {
 		}
 		switch {
 		case webFontExts[ext]:
-			webOnly = append(webOnly, name)
+			web[variant] = append(web[variant], dir)
 		case sfntExts[ext]:
 			if _, taken := found[variant]; !taken {
 				found[variant] = Face{Variant: variant, Path: filepath.Join(dir, name), Source: dir}
 			}
 		}
 	}
-	return webFontNote(dir, typeface, webOnly, found), nil
-}
-
-// webFontNote reports web fonts that could not be used, but only where they
-// would actually have helped: a directory whose .woff2 files duplicate sfnt
-// already found is not worth mentioning.
-func webFontNote(dir, typeface string, webOnly []string, found map[Variant]Face) []string {
-	if len(webOnly) == 0 || len(found) == len(Variants()) {
-		return nil
-	}
-	return []string{fmt.Sprintf(
-		"%s: %s holds %d web-font file(s) that cannot be embedded (a .pptx carries sfnt, "+
-			"not woff); ship .ttf or .otf alongside them, or install the face",
-		typeface, dir, len(webOnly))}
+	return nil
 }
 
 // variantOf reads the variant from a filename's suffix after the last dash.
